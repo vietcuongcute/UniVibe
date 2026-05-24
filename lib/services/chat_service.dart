@@ -110,6 +110,16 @@ class ChatService {
     chatRoomsNotifier.value = updatedRooms;
   }
 
+  static String hideChatRoom(ChatRoom room) {
+    final updatedRooms = chatRooms.where((chatRoom) {
+      return chatRoom.id != room.id;
+    }).toList();
+
+    chatRoomsNotifier.value = updatedRooms;
+
+    return 'Đã ẩn đoạn chat với ${room.otherUser.nickname}.';
+  }
+
   static String deleteChatRoom(ChatRoom room) {
     final updatedRooms = chatRooms.where((chatRoom) {
       return chatRoom.id != room.id;

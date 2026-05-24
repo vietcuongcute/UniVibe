@@ -1,47 +1,111 @@
 import 'package:flutter/material.dart';
 
-import '../data/mock_users.dart';
 import '../models/chat_room.dart';
+import '../models/user_profile.dart';
 import '../models/vibe_signal.dart';
 import '../services/chat_service.dart';
 import '../services/signal_service.dart';
+import '../services/user_profile_service.dart';
 import 'chat_detail_screen.dart';
 
-class SignalsScreen extends StatelessWidget {
+class SignalsScreen extends StatefulWidget {
   const SignalsScreen({super.key});
 
   @override
+  State<SignalsScreen> createState() => _SignalsScreenState();
+}
+
+class _SignalsScreenState extends State<SignalsScreen> {
+  late Future<UserProfile?> currentUserFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    currentUserFuture = _initData();
+  }
+
+  Future<UserProfile?> _initData() async {
+    await SignalService.loadCurrentUserSignals();
+    return UserProfileService.getCurrentUserProfile();
+  }
+
+  Future<void> refreshSignals() async {
+    setState(() {
+      currentUserFuture = _initData();
+    });
+
+    await currentUserFuture;
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return DefaultTabController(
-      length: 2,
-      child: Scaffold(
-        backgroundColor: const Color(0xFFF7F3FF),
-        body: SafeArea(
-          child: Column(
-            children: [
-              _buildHeader(context),
-              const TabBar(
-                labelColor: Color(0xFF7B61FF),
-                unselectedLabelColor: Colors.black45,
-                indicatorColor: Color(0xFF7B61FF),
-                indicatorWeight: 3,
-                tabs: [
-                  Tab(text: 'Đã nhận'),
-                  Tab(text: 'Đã gửi'),
+    return FutureBuilder<UserProfile?>(
+      future: currentUserFuture,
+      builder: (context, snapshot) {
+        final currentUser = snapshot.data;
+
+        return DefaultTabController(
+          length: 2,
+          child: Scaffold(
+            backgroundColor: const Color(0xFFF7F3FF),
+            body: SafeArea(
+              child: Column(
+                children: [
+                  _buildHeader(context),
+                  const TabBar(
+                    labelColor: Color(0xFF7B61FF),
+                    unselectedLabelColor: Colors.black45,
+                    indicatorColor: Color(0xFF7B61FF),
+                    indicatorWeight: 3,
+                    tabs: [
+                      Tab(text: 'Đã nhận'),
+                      Tab(text: 'Đã gửi'),
+                    ],
+                  ),
+                  Expanded(
+                    child: _buildMainContent(
+                      snapshot: snapshot,
+                      currentUser: currentUser,
+                    ),
+                  ),
                 ],
               ),
-              Expanded(
-                child: TabBarView(
-                  children: [
-                    _buildReceivedSignalsTab(context),
-                    _buildSentSignalsTab(context),
-                  ],
-                ),
-              ),
-            ],
+            ),
           ),
+        );
+      },
+    );
+  }
+
+  Widget _buildMainContent({
+    required AsyncSnapshot<UserProfile?> snapshot,
+    required UserProfile? currentUser,
+  }) {
+    if (snapshot.connectionState == ConnectionState.waiting) {
+      return const Center(
+        child: CircularProgressIndicator(color: Color(0xFF7B61FF)),
+      );
+    }
+
+    if (snapshot.hasError) {
+      return _buildErrorState(snapshot.error.toString());
+    }
+
+    if (currentUser == null) {
+      return _buildErrorState('Không tìm thấy profile hiện tại');
+    }
+
+    return TabBarView(
+      children: [
+        RefreshIndicator(
+          onRefresh: refreshSignals,
+          child: _buildReceivedSignalsTab(context, currentUser),
         ),
-      ),
+        RefreshIndicator(
+          onRefresh: refreshSignals,
+          child: _buildSentSignalsTab(context),
+        ),
+      ],
     );
   }
 
@@ -95,14 +159,18 @@ class SignalsScreen extends StatelessWidget {
                   ),
                 ),
               ),
-              Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.18),
-                  shape: BoxShape.circle,
+              InkWell(
+                borderRadius: BorderRadius.circular(100),
+                onTap: refreshSignals,
+                child: Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.18),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.refresh_rounded, color: Colors.white),
                 ),
-                child: const Icon(Icons.bolt_rounded, color: Colors.white),
               ),
             ],
           ),
@@ -143,20 +211,30 @@ class SignalsScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildReceivedSignalsTab(BuildContext context) {
+  Widget _buildReceivedSignalsTab(
+    BuildContext context,
+    UserProfile currentUser,
+  ) {
     return ValueListenableBuilder<List<VibeSignal>>(
       valueListenable: SignalService.receivedSignalsNotifier,
       builder: (context, signals, child) {
         if (signals.isEmpty) {
-          return _buildEmptyState(
-            icon: Icons.inbox_rounded,
-            title: 'Chưa có signal đã nhận',
-            subtitle:
-                'Khi có người thấy bạn hợp vibe và gửi signal, tín hiệu sẽ xuất hiện ở đây.',
+          return ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            children: [
+              const SizedBox(height: 80),
+              _buildEmptyState(
+                icon: Icons.inbox_rounded,
+                title: 'Chưa có signal đã nhận',
+                subtitle:
+                    'Khi có người thấy bạn hợp vibe và gửi signal, tín hiệu sẽ xuất hiện ở đây.',
+              ),
+            ],
           );
         }
 
         return ListView.builder(
+          physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.fromLTRB(18, 16, 18, 24),
           itemCount: signals.length,
           itemBuilder: (context, index) {
@@ -173,12 +251,33 @@ class SignalsScreen extends StatelessWidget {
                     context: context,
                     otherUserId: signal.senderId,
                   );
-
                   return;
                 }
 
-                _showSignalBackDialog(context: context, signal: signal);
+                _showSignalBackDialog(
+                  context: context,
+                  currentUser: currentUser,
+                  signal: signal,
+                );
               },
+              onDeclineAction: signal.status == 'pending'
+                  ? () async {
+                      final result = await SignalService.declineSignal(
+                        signal.id,
+                      );
+
+                      await SignalService.loadCurrentUserSignals();
+
+                      if (!context.mounted) return;
+
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(result),
+                          behavior: SnackBarBehavior.floating,
+                        ),
+                      );
+                    }
+                  : null,
             );
           },
         );
@@ -191,15 +290,22 @@ class SignalsScreen extends StatelessWidget {
       valueListenable: SignalService.sentSignalsNotifier,
       builder: (context, signals, child) {
         if (signals.isEmpty) {
-          return _buildEmptyState(
-            icon: Icons.send_rounded,
-            title: 'Chưa gửi signal nào',
-            subtitle:
-                'Hãy vào Daily Match để gửi tín hiệu nhẹ cho người bạn thấy hợp vibe.',
+          return ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            children: [
+              const SizedBox(height: 80),
+              _buildEmptyState(
+                icon: Icons.send_rounded,
+                title: 'Chưa gửi signal nào',
+                subtitle:
+                    'Hãy vào Daily Match để gửi tín hiệu nhẹ cho người bạn thấy hợp vibe.',
+              ),
+            ],
           );
         }
 
         return ListView.builder(
+          physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.fromLTRB(18, 16, 18, 24),
           itemCount: signals.length,
           itemBuilder: (context, index) {
@@ -218,6 +324,7 @@ class SignalsScreen extends StatelessWidget {
                       );
                     }
                   : null,
+              onDeclineAction: null,
             );
           },
         );
@@ -230,55 +337,50 @@ class SignalsScreen extends StatelessWidget {
     required String title,
     required String subtitle,
   }) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(28),
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(26),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.purple.withOpacity(0.08),
-                blurRadius: 18,
-                offset: const Offset(0, 8),
+    return Padding(
+      padding: const EdgeInsets.all(28),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(26),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.purple.withOpacity(0.08),
+              blurRadius: 18,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 76,
+              height: 76,
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFF3E0),
+                borderRadius: BorderRadius.circular(24),
               ),
-            ],
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 76,
-                height: 76,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFFF3E0),
-                  borderRadius: BorderRadius.circular(24),
-                ),
-                child: Icon(icon, color: const Color(0xFFFF9800), size: 40),
+              child: Icon(icon, color: const Color(0xFFFF9800), size: 40),
+            ),
+            const SizedBox(height: 18),
+            Text(
+              title,
+              style: const TextStyle(fontSize: 21, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              subtitle,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Colors.black54,
+                fontSize: 14,
+                height: 1.45,
               ),
-              const SizedBox(height: 18),
-              Text(
-                title,
-                style: const TextStyle(
-                  fontSize: 21,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                subtitle,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: Colors.black54,
-                  fontSize: 14,
-                  height: 1.45,
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -290,9 +392,11 @@ class SignalsScreen extends StatelessWidget {
     required String titleName,
     required bool isReceived,
     required VoidCallback? onPrimaryAction,
+    required VoidCallback? onDeclineAction,
   }) {
     final Color statusColor = _getStatusColor(signal.status);
     final bool isMutual = signal.status == 'mutual';
+    final bool isPending = signal.status == 'pending';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
@@ -348,7 +452,7 @@ class SignalsScreen extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  titleName,
+                  titleName.isEmpty ? 'Người dùng UniVibe' : titleName,
                   style: const TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
@@ -374,22 +478,56 @@ class SignalsScreen extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 14),
-                if (isReceived || isMutual)
+                if (isReceived && isPending)
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: onPrimaryAction,
+                          icon: const Icon(Icons.bolt_rounded, size: 18),
+                          label: const Text('Signal lại'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFFFF9800),
+                            foregroundColor: Colors.white,
+                            elevation: 0,
+                            padding: const EdgeInsets.symmetric(vertical: 13),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(15),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      InkWell(
+                        borderRadius: BorderRadius.circular(15),
+                        onTap: onDeclineAction,
+                        child: Container(
+                          width: 48,
+                          height: 48,
+                          decoration: BoxDecoration(
+                            color: Colors.red.withOpacity(0.08),
+                            borderRadius: BorderRadius.circular(15),
+                            border: Border.all(
+                              color: Colors.red.withOpacity(0.18),
+                            ),
+                          ),
+                          child: const Icon(
+                            Icons.close_rounded,
+                            color: Colors.red,
+                          ),
+                        ),
+                      ),
+                    ],
+                  )
+                else if (isMutual)
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton.icon(
                       onPressed: onPrimaryAction,
-                      icon: Icon(
-                        isMutual
-                            ? Icons.chat_bubble_rounded
-                            : Icons.bolt_rounded,
-                        size: 18,
-                      ),
-                      label: Text(isMutual ? 'Mở chat' : 'Signal lại'),
+                      icon: const Icon(Icons.chat_bubble_rounded, size: 18),
+                      label: const Text('Mở chat'),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: isMutual
-                            ? const Color(0xFF4CAF50)
-                            : const Color(0xFFFF9800),
+                        backgroundColor: const Color(0xFF4CAF50),
                         foregroundColor: Colors.white,
                         elevation: 0,
                         padding: const EdgeInsets.symmetric(vertical: 13),
@@ -399,7 +537,7 @@ class SignalsScreen extends StatelessWidget {
                       ),
                     ),
                   )
-                else
+                else if (!isReceived && isPending)
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.symmetric(
@@ -432,6 +570,27 @@ class SignalsScreen extends StatelessWidget {
                           ),
                         ),
                       ],
+                    ),
+                  )
+                else
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(15),
+                      border: Border.all(color: Colors.grey.shade300),
+                    ),
+                    child: Text(
+                      _getStatusText(signal.status),
+                      style: TextStyle(
+                        color: Colors.grey.shade700,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                      ),
                     ),
                   ),
               ],
@@ -495,6 +654,7 @@ class SignalsScreen extends StatelessWidget {
 
   void _showSignalBackDialog({
     required BuildContext context,
+    required UserProfile currentUser,
     required VibeSignal signal,
   }) {
     final messageController = TextEditingController(
@@ -504,99 +664,135 @@ class SignalsScreen extends StatelessWidget {
     showDialog(
       context: context,
       builder: (dialogContext) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(24),
-          ),
-          title: Row(
-            children: [
-              Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFF9800).withOpacity(0.14),
-                  borderRadius: BorderRadius.circular(15),
-                ),
-                child: const Icon(Icons.bolt_rounded, color: Color(0xFFFF9800)),
+        bool isSending = false;
+
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(24),
               ),
-              const SizedBox(width: 12),
-              const Expanded(
-                child: Text(
-                  'Signal lại',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-              ),
-            ],
-          ),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Gửi signal lại cho ${signal.senderName}. Sau khi mutual signal, phòng chat sẽ được mở.',
-                  style: const TextStyle(color: Colors.black54, height: 1.4),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: messageController,
-                  maxLines: 3,
-                  decoration: InputDecoration(
-                    labelText: 'Lời nhắn',
-                    filled: true,
-                    fillColor: const Color(0xFFF7F3FF),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(16),
+              title: Row(
+                children: [
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFF9800).withOpacity(0.14),
+                      borderRadius: BorderRadius.circular(15),
                     ),
+                    child: const Icon(
+                      Icons.bolt_rounded,
+                      color: Color(0xFFFF9800),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Text(
+                      'Signal lại',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ],
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Gửi signal lại cho ${signal.senderName}. Sau khi mutual signal, phòng chat sẽ được mở.',
+                      style: const TextStyle(
+                        color: Colors.black54,
+                        height: 1.4,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: messageController,
+                      maxLines: 3,
+                      enabled: !isSending,
+                      decoration: InputDecoration(
+                        labelText: 'Lời nhắn',
+                        filled: true,
+                        fillColor: const Color(0xFFF7F3FF),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: isSending
+                      ? null
+                      : () {
+                          Navigator.pop(dialogContext);
+                        },
+                  child: const Text('Hủy'),
+                ),
+                ElevatedButton.icon(
+                  onPressed: isSending
+                      ? null
+                      : () async {
+                          setDialogState(() {
+                            isSending = true;
+                          });
+
+                          final result = await SignalService.signalBack(
+                            currentUser: currentUser,
+                            senderId: signal.senderId,
+                            message: messageController.text.trim().isEmpty
+                                ? 'Mình cũng thấy bạn hợp vibe, kết nối nhé!'
+                                : messageController.text.trim(),
+                          );
+
+                          await SignalService.loadCurrentUserSignals();
+
+                          if (!context.mounted) return;
+
+                          Navigator.pop(dialogContext);
+
+                          final chatRoom = ChatService.getChatRoomWith(
+                            signal.senderId,
+                          );
+
+                          if (chatRoom != null) {
+                            _showMutualSuccessDialog(
+                              context: context,
+                              userName: signal.senderName,
+                              chatRoom: chatRoom,
+                            );
+                          } else {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(result),
+                                behavior: SnackBarBehavior.floating,
+                              ),
+                            );
+                          }
+                        },
+                  icon: isSending
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.bolt_rounded, size: 18),
+                  label: Text(isSending ? 'Đang gửi...' : 'Signal lại'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFFF9800),
+                    foregroundColor: Colors.white,
                   ),
                 ),
               ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.pop(dialogContext);
-              },
-              child: const Text('Hủy'),
-            ),
-            ElevatedButton.icon(
-              onPressed: () {
-                final result = SignalService.signalBack(
-                  currentUser: currentUser,
-                  senderId: signal.senderId,
-                  message: messageController.text.trim().isEmpty
-                      ? 'Mình cũng thấy bạn hợp vibe, kết nối nhé!'
-                      : messageController.text.trim(),
-                );
-
-                Navigator.pop(dialogContext);
-
-                final chatRoom = ChatService.getChatRoomWith(signal.senderId);
-
-                if (chatRoom != null) {
-                  _showMutualSuccessDialog(
-                    context: context,
-                    userName: signal.senderName,
-                    chatRoom: chatRoom,
-                  );
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(result),
-                      behavior: SnackBarBehavior.floating,
-                    ),
-                  );
-                }
-              },
-              icon: const Icon(Icons.bolt_rounded, size: 18),
-              label: const Text('Signal lại'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFFF9800),
-                foregroundColor: Colors.white,
-              ),
-            ),
-          ],
+            );
+          },
         );
       },
     );
@@ -698,6 +894,76 @@ class SignalsScreen extends StatelessWidget {
     );
   }
 
+  Widget _buildErrorState(String error) {
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      children: [
+        const SizedBox(height: 80),
+        Padding(
+          padding: const EdgeInsets.all(28),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(26),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.purple.withOpacity(0.08),
+                  blurRadius: 18,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 76,
+                  height: 76,
+                  decoration: BoxDecoration(
+                    color: Colors.red.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(24),
+                  ),
+                  child: const Icon(
+                    Icons.error_outline_rounded,
+                    size: 42,
+                    color: Colors.red,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                const Text(
+                  'Không tải được signals',
+                  style: TextStyle(fontSize: 21, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  error,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.black54,
+                    fontSize: 14,
+                    height: 1.4,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                ElevatedButton.icon(
+                  onPressed: refreshSignals,
+                  icon: const Icon(Icons.refresh_rounded),
+                  label: const Text('Thử lại'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF7B61FF),
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   String _getStatusText(String status) {
     if (status == 'pending') {
       return 'Đang chờ';
@@ -705,8 +971,10 @@ class SignalsScreen extends StatelessWidget {
       return 'Mutual';
     } else if (status == 'accepted') {
       return 'Đã đồng ý';
-    } else {
+    } else if (status == 'declined') {
       return 'Đã từ chối';
+    } else {
+      return status;
     }
   }
 
@@ -717,15 +985,36 @@ class SignalsScreen extends StatelessWidget {
       return const Color(0xFF4CAF50);
     } else if (status == 'accepted') {
       return const Color(0xFF4CAF50);
-    } else {
+    } else if (status == 'declined') {
       return const Color(0xFFE53935);
+    } else {
+      return Colors.grey;
     }
   }
 
   String _formatTime(DateTime time) {
-    final hour = time.hour.toString().padLeft(2, '0');
-    final minute = time.minute.toString().padLeft(2, '0');
+    final now = DateTime.now();
+    final difference = now.difference(time);
 
-    return '$hour:$minute';
+    if (difference.inMinutes < 1) {
+      return 'Vừa xong';
+    }
+
+    if (difference.inMinutes < 60) {
+      return '${difference.inMinutes} phút trước';
+    }
+
+    if (difference.inHours < 24) {
+      return '${difference.inHours} giờ trước';
+    }
+
+    if (difference.inDays < 7) {
+      return '${difference.inDays} ngày trước';
+    }
+
+    final day = time.day.toString().padLeft(2, '0');
+    final month = time.month.toString().padLeft(2, '0');
+
+    return '$day/$month';
   }
 }

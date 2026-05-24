@@ -1,8 +1,14 @@
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 
-import 'screens/welcome_screen.dart';
+import 'firebase_options.dart';
+import 'screens/auth_gate.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
   runApp(const UniVibeApp());
 }
 
@@ -14,8 +20,12 @@ class UniVibeApp extends StatelessWidget {
     return MaterialApp(
       title: 'UniVibe',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(colorSchemeSeed: Colors.deepPurple, useMaterial3: true),
-      home: const WelcomeScreen(),
+      theme: ThemeData(
+        colorSchemeSeed: const Color(0xFF7B61FF),
+        scaffoldBackgroundColor: const Color(0xFFF7F3FF),
+        useMaterial3: true,
+      ),
+      home: const AuthGate(),
     );
   }
 }

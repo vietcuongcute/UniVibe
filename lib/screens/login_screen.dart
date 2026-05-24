@@ -1,5 +1,9 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../services/auth_service.dart';
+import '../services/user_profile_service.dart';
+import 'create_profile_screen.dart';
 import 'home_screen.dart';
 import 'register_screen.dart';
 
@@ -17,38 +21,91 @@ class _LoginScreenState extends State<LoginScreen> {
   bool isLoading = false;
   bool obscurePassword = true;
 
-  void login() {
+  Future<void> login() async {
     final email = emailController.text.trim();
     final password = passwordController.text.trim();
 
     if (email.isEmpty || password.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Vui lòng nhập email và mật khẩu'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      showMessage('Vui lòng nhập email và mật khẩu');
       return;
     }
 
-    setState(() => isLoading = true);
+    try {
+      setState(() => isLoading = true);
 
-    Future.delayed(const Duration(seconds: 1), () {
+      await AuthService.login(email: email, password: password);
+
+      final hasProfile = await UserProfileService.hasProfile();
+
       if (!mounted) return;
 
-      setState(() => isLoading = false);
+      if (hasProfile) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const HomeScreen()),
+        );
+      } else {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const CreateProfileScreen()),
+        );
+      }
+    } on FirebaseAuthException catch (e) {
+      showMessage(_getLoginErrorMessage(e));
+    } catch (e) {
+      showMessage('Đăng nhập thất bại: $e');
+    } finally {
+      if (mounted) {
+        setState(() => isLoading = false);
+      }
+    }
+  }
 
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const HomeScreen()),
-      );
-    });
+  Future<void> forgotPassword() async {
+    final email = emailController.text.trim();
+
+    if (email.isEmpty) {
+      showMessage('Nhập email trước rồi bấm quên mật khẩu');
+      return;
+    }
+
+    try {
+      await AuthService.resetPassword(email: email);
+      showMessage('Đã gửi email đặt lại mật khẩu');
+    } on FirebaseAuthException catch (e) {
+      showMessage('Không gửi được email: ${e.message ?? e.code}');
+    } catch (e) {
+      showMessage('Không gửi được email: $e');
+    }
+  }
+
+  String _getLoginErrorMessage(FirebaseAuthException e) {
+    switch (e.code) {
+      case 'invalid-email':
+        return 'Email không hợp lệ';
+      case 'user-disabled':
+        return 'Tài khoản này đã bị khóa';
+      case 'user-not-found':
+        return 'Không tìm thấy tài khoản';
+      case 'wrong-password':
+        return 'Sai mật khẩu';
+      case 'invalid-credential':
+        return 'Email hoặc mật khẩu không đúng';
+      default:
+        return 'Đăng nhập thất bại: ${e.message ?? e.code}';
+    }
   }
 
   void goToRegister() {
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(builder: (_) => const RegisterScreen()),
+    );
+  }
+
+  void showMessage(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
     );
   }
 
@@ -199,7 +256,6 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
             ),
             const SizedBox(height: 24),
-
             _buildTextField(
               controller: emailController,
               label: 'Email sinh viên',
@@ -207,9 +263,7 @@ class _LoginScreenState extends State<LoginScreen> {
               icon: Icons.email_rounded,
               keyboardType: TextInputType.emailAddress,
             ),
-
             const SizedBox(height: 16),
-
             _buildTextField(
               controller: passwordController,
               label: 'Mật khẩu',
@@ -230,28 +284,15 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
               ),
             ),
-
             const SizedBox(height: 12),
-
             Align(
               alignment: Alignment.centerRight,
               child: TextButton(
-                onPressed: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text(
-                        'Quên mật khẩu sẽ làm sau khi nối Firebase.',
-                      ),
-                      behavior: SnackBarBehavior.floating,
-                    ),
-                  );
-                },
+                onPressed: forgotPassword,
                 child: const Text('Quên mật khẩu?'),
               ),
             ),
-
             const SizedBox(height: 10),
-
             SizedBox(
               width: double.infinity,
               height: 54,
@@ -284,9 +325,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
               ),
             ),
-
             const SizedBox(height: 16),
-
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -303,9 +342,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
               ],
             ),
-
             const SizedBox(height: 4),
-
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(14),

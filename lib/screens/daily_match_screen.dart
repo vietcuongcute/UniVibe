@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 
-import '../data/mock_users.dart';
 import '../models/user_profile.dart';
 import '../services/block_service.dart';
 import '../services/hidden_match_service.dart';
 import '../services/match_service.dart';
 import '../services/signal_service.dart';
+import '../services/user_profile_service.dart';
 
 class DailyMatchScreen extends StatefulWidget {
   const DailyMatchScreen({super.key});
@@ -15,71 +15,123 @@ class DailyMatchScreen extends StatefulWidget {
 }
 
 class _DailyMatchScreenState extends State<DailyMatchScreen> {
-  List<MatchResult> getDailyMatches() {
-    return generateDailyMatches(
-      currentUser: currentUser,
-      users: mockUsers,
-    ).where((match) {
+  late Future<_DailyMatchData> dailyMatchFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    dailyMatchFuture = _loadDailyMatches();
+  }
+
+  Future<_DailyMatchData> _loadDailyMatches() async {
+    final currentUserProfile = await UserProfileService.getCurrentUserProfile();
+
+    if (currentUserProfile == null) {
+      throw Exception('Không tìm thấy profile hiện tại');
+    }
+
+    final matches = await generateDailyMatchesFromFirestore(
+      hideZeroScore: false,
+    );
+
+    final filteredMatches = matches.where((match) {
       final userId = match.user.id;
 
       return !BlockService.isBlocked(userId) &&
           !HiddenMatchService.isHidden(userId);
     }).toList();
+
+    return _DailyMatchData(
+      currentUser: currentUserProfile,
+      matches: filteredMatches,
+    );
   }
 
   void refreshMatches() {
-    setState(() {});
+    setState(() {
+      dailyMatchFuture = _loadDailyMatches();
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    final List<MatchResult> dailyMatches = getDailyMatches();
+    return FutureBuilder<_DailyMatchData>(
+      future: dailyMatchFuture,
+      builder: (context, snapshot) {
+        final int matchCount = snapshot.data?.matches.length ?? 0;
 
-    return Scaffold(
-      backgroundColor: const Color(0xFFF7F3FF),
-      body: SafeArea(
-        child: Column(
-          children: [
-            _buildHeader(context, dailyMatches.length),
-            Expanded(
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 300),
-                child: dailyMatches.isEmpty
-                    ? _buildEmptyMatches()
-                    : ListView.builder(
-                        key: ValueKey(dailyMatches.length),
-                        padding: const EdgeInsets.fromLTRB(18, 16, 18, 24),
-                        itemCount: dailyMatches.length,
-                        itemBuilder: (context, index) {
-                          final match = dailyMatches[index];
-                          final user = match.user;
+        return Scaffold(
+          backgroundColor: const Color(0xFFF7F3FF),
+          body: SafeArea(
+            child: Column(
+              children: [
+                _buildHeader(context, matchCount),
+                Expanded(child: _buildBody(snapshot)),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
 
-                          return TweenAnimationBuilder<double>(
-                            tween: Tween(begin: 0, end: 1),
-                            duration: Duration(milliseconds: 350 + index * 80),
-                            curve: Curves.easeOutCubic,
-                            builder: (context, value, child) {
-                              return Opacity(
-                                opacity: value,
-                                child: Transform.translate(
-                                  offset: Offset(0, 24 * (1 - value)),
-                                  child: child,
-                                ),
-                              );
-                            },
-                            child: _buildMatchCard(
-                              context: context,
-                              user: user,
-                              match: match,
-                            ),
-                          );
-                        },
-                      ),
+  Widget _buildBody(AsyncSnapshot<_DailyMatchData> snapshot) {
+    if (snapshot.connectionState == ConnectionState.waiting) {
+      return _buildLoadingState();
+    }
+
+    if (snapshot.hasError) {
+      return _buildErrorState(snapshot.error.toString());
+    }
+
+    final data = snapshot.data;
+
+    if (data == null) {
+      return _buildErrorState('Không tải được Daily Match');
+    }
+
+    final dailyMatches = data.matches;
+
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 300),
+      child: dailyMatches.isEmpty
+          ? _buildEmptyMatches()
+          : RefreshIndicator(
+              onRefresh: () async {
+                refreshMatches();
+                await dailyMatchFuture;
+              },
+              child: ListView.builder(
+                key: ValueKey(dailyMatches.length),
+                padding: const EdgeInsets.fromLTRB(18, 16, 18, 24),
+                itemCount: dailyMatches.length,
+                itemBuilder: (context, index) {
+                  final match = dailyMatches[index];
+                  final user = match.user;
+
+                  return TweenAnimationBuilder<double>(
+                    tween: Tween(begin: 0, end: 1),
+                    duration: Duration(milliseconds: 350 + index * 80),
+                    curve: Curves.easeOutCubic,
+                    builder: (context, value, child) {
+                      return Opacity(
+                        opacity: value,
+                        child: Transform.translate(
+                          offset: Offset(0, 24 * (1 - value)),
+                          child: child,
+                        ),
+                      );
+                    },
+                    child: _buildMatchCard(
+                      context: context,
+                      currentUser: data.currentUser,
+                      user: user,
+                      match: match,
+                    ),
+                  );
+                },
               ),
             ),
-          ],
-        ),
-      ),
     );
   }
 
@@ -133,16 +185,17 @@ class _DailyMatchScreenState extends State<DailyMatchScreen> {
                   ),
                 ),
               ),
-              Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.18),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.favorite_border_rounded,
-                  color: Colors.white,
+              InkWell(
+                borderRadius: BorderRadius.circular(100),
+                onTap: refreshMatches,
+                child: Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.18),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.refresh_rounded, color: Colors.white),
                 ),
               ),
             ],
@@ -197,6 +250,7 @@ class _DailyMatchScreenState extends State<DailyMatchScreen> {
 
   Widget _buildMatchCard({
     required BuildContext context,
+    required UserProfile currentUser,
     required UserProfile user,
     required MatchResult match,
   }) {
@@ -224,7 +278,7 @@ class _DailyMatchScreenState extends State<DailyMatchScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  user.bio,
+                  user.bio.isEmpty ? 'Chưa có bio.' : user.bio,
                   style: const TextStyle(
                     fontSize: 14,
                     color: Colors.black87,
@@ -234,12 +288,15 @@ class _DailyMatchScreenState extends State<DailyMatchScreen> {
                 const SizedBox(height: 16),
                 _buildInfoRow(
                   icon: Icons.school_rounded,
-                  text: user.university,
+                  text: user.university.isEmpty
+                      ? 'Chưa cập nhật trường'
+                      : user.university,
                 ),
                 const SizedBox(height: 8),
                 _buildInfoRow(
                   icon: Icons.menu_book_rounded,
-                  text: '${user.major} · Năm ${user.year}',
+                  text:
+                      '${user.major.isEmpty ? 'Chưa cập nhật ngành' : user.major} · Năm ${user.year}',
                 ),
                 const SizedBox(height: 18),
                 _buildSectionTitle('Mục tiêu'),
@@ -264,6 +321,7 @@ class _DailyMatchScreenState extends State<DailyMatchScreen> {
                             : () {
                                 _showSignalDialog(
                                   context: context,
+                                  currentUser: currentUser,
                                   receiver: user,
                                 );
                               },
@@ -282,6 +340,10 @@ class _DailyMatchScreenState extends State<DailyMatchScreen> {
   }
 
   Widget _buildCardTop(UserProfile user, MatchResult match) {
+    final String avatarLetter = user.nickname.trim().isEmpty
+        ? 'U'
+        : user.nickname.trim()[0].toUpperCase();
+
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: const BoxDecoration(
@@ -299,7 +361,7 @@ class _DailyMatchScreenState extends State<DailyMatchScreen> {
                 radius: 34,
                 backgroundColor: const Color(0xFF7B61FF),
                 child: Text(
-                  user.nickname[0].toUpperCase(),
+                  avatarLetter,
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 26,
@@ -328,7 +390,7 @@ class _DailyMatchScreenState extends State<DailyMatchScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  user.nickname,
+                  user.nickname.isEmpty ? 'Người dùng UniVibe' : user.nickname,
                   style: const TextStyle(
                     fontSize: 19,
                     fontWeight: FontWeight.bold,
@@ -336,7 +398,7 @@ class _DailyMatchScreenState extends State<DailyMatchScreen> {
                 ),
                 const SizedBox(height: 5),
                 Text(
-                  '${user.major} · Năm ${user.year}',
+                  '${user.major.isEmpty ? 'Chưa cập nhật ngành' : user.major} · Năm ${user.year}',
                   style: const TextStyle(color: Colors.black54, fontSize: 13),
                 ),
               ],
@@ -406,12 +468,23 @@ class _DailyMatchScreenState extends State<DailyMatchScreen> {
     );
   }
 
-  Widget _buildChipWrap(List items, Color color) {
+  Widget _buildChipWrap(List<String> items, Color color) {
+    if (items.isEmpty) {
+      return Text(
+        'Chưa cập nhật',
+        style: TextStyle(
+          color: Colors.grey.shade600,
+          fontSize: 13,
+          fontStyle: FontStyle.italic,
+        ),
+      );
+    }
+
     return Wrap(
       spacing: 8,
       runSpacing: 8,
       children: items.map((item) {
-        return _buildChip(item.toString(), color);
+        return _buildChip(item, color);
       }).toList(),
     );
   }
@@ -507,6 +580,7 @@ class _DailyMatchScreenState extends State<DailyMatchScreen> {
 
   void _showSignalDialog({
     required BuildContext context,
+    required UserProfile currentUser,
     required UserProfile receiver,
   }) {
     final defaultMessage = _getDefaultSignalMessage(receiver);
@@ -522,117 +596,169 @@ class _DailyMatchScreenState extends State<DailyMatchScreen> {
     showDialog(
       context: context,
       builder: (dialogContext) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(24),
-          ),
-          title: Row(
-            children: [
-              Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFF9800).withOpacity(0.14),
-                  borderRadius: BorderRadius.circular(15),
-                ),
-                child: const Icon(Icons.bolt_rounded, color: Color(0xFFFF9800)),
+        bool isSending = false;
+
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(24),
               ),
-              const SizedBox(width: 12),
-              const Expanded(
-                child: Text(
-                  'Gửi Signal',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-              ),
-            ],
-          ),
-          content: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Gửi một lời nhắn ngắn cho ${receiver.nickname}. Nếu bạn ấy signal lại, hai bạn sẽ mở được phòng chat.',
-                  style: const TextStyle(
-                    color: Colors.black54,
-                    fontSize: 14,
-                    height: 1.4,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: messageController,
-                  maxLines: 3,
-                  decoration: InputDecoration(
-                    labelText: 'Lời nhắn',
-                    hintText: 'Nhập lời nhắn...',
-                    filled: true,
-                    fillColor: const Color(0xFFF7F3FF),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(16),
+              title: Row(
+                children: [
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFF9800).withOpacity(0.14),
+                      borderRadius: BorderRadius.circular(15),
+                    ),
+                    child: const Icon(
+                      Icons.bolt_rounded,
+                      color: Color(0xFFFF9800),
                     ),
                   ),
-                ),
-                const SizedBox(height: 14),
-                const Text(
-                  'Chọn nhanh',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: quickMessages.map((message) {
-                    return ActionChip(
-                      label: Text(
-                        message,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Text(
+                      'Gửi Signal',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ],
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Gửi một lời nhắn ngắn cho ${receiver.nickname}. Nếu bạn ấy signal lại, hai bạn sẽ mở được phòng chat.',
+                      style: const TextStyle(
+                        color: Colors.black54,
+                        fontSize: 14,
+                        height: 1.4,
                       ),
-                      onPressed: () {
-                        messageController.text = message;
-                      },
-                    );
-                  }).toList(),
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: messageController,
+                      maxLines: 3,
+                      enabled: !isSending,
+                      decoration: InputDecoration(
+                        labelText: 'Lời nhắn',
+                        hintText: 'Nhập lời nhắn...',
+                        filled: true,
+                        fillColor: const Color(0xFFF7F3FF),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    const Text(
+                      'Chọn nhanh',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: quickMessages.map((message) {
+                        return ActionChip(
+                          label: Text(
+                            message,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          onPressed: isSending
+                              ? null
+                              : () {
+                                  messageController.text = message;
+                                },
+                        );
+                      }).toList(),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: isSending
+                      ? null
+                      : () {
+                          Navigator.pop(dialogContext);
+                        },
+                  child: const Text('Hủy'),
+                ),
+                ElevatedButton.icon(
+                  onPressed: isSending
+                      ? null
+                      : () async {
+                          setDialogState(() {
+                            isSending = true;
+                          });
+
+                          try {
+                            final result =
+                                await SignalService.sendSignal(
+                                  currentUser: currentUser,
+                                  receiver: receiver,
+                                  message: messageController.text.trim().isEmpty
+                                      ? defaultMessage
+                                      : messageController.text.trim(),
+                                ).timeout(
+                                  const Duration(seconds: 12),
+                                  onTimeout: () {
+                                    return 'Gửi signal quá lâu. Kiểm tra mạng hoặc Firestore Rules.';
+                                  },
+                                );
+
+                            if (!context.mounted) return;
+
+                            Navigator.pop(dialogContext);
+
+                            setState(() {});
+
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(result),
+                                behavior: SnackBarBehavior.floating,
+                              ),
+                            );
+                          } catch (e) {
+                            if (!context.mounted) return;
+
+                            setDialogState(() {
+                              isSending = false;
+                            });
+
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Gửi signal thất bại: $e'),
+                                behavior: SnackBarBehavior.floating,
+                              ),
+                            );
+                          }
+                        },
+                  icon: isSending
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.send_rounded, size: 18),
+                  label: Text(isSending ? 'Đang gửi...' : 'Gửi'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFFF9800),
+                    foregroundColor: Colors.white,
+                  ),
                 ),
               ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.pop(dialogContext);
-              },
-              child: const Text('Hủy'),
-            ),
-            ElevatedButton.icon(
-              onPressed: () {
-                final result = SignalService.sendSignal(
-                  currentUser: currentUser,
-                  receiver: receiver,
-                  message: messageController.text.trim().isEmpty
-                      ? defaultMessage
-                      : messageController.text.trim(),
-                );
-
-                Navigator.pop(dialogContext);
-
-                setState(() {});
-
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(result),
-                    behavior: SnackBarBehavior.floating,
-                  ),
-                );
-              },
-              icon: const Icon(Icons.send_rounded, size: 18),
-              label: const Text('Gửi'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFFF9800),
-                foregroundColor: Colors.white,
-              ),
-            ),
-          ],
+            );
+          },
         );
       },
     );
@@ -658,6 +784,78 @@ class _DailyMatchScreenState extends State<DailyMatchScreen> {
     }
 
     return 'Bạn có vẻ cùng vibe với mình!';
+  }
+
+  Widget _buildLoadingState() {
+    return const Center(
+      child: CircularProgressIndicator(color: Color(0xFF7B61FF)),
+    );
+  }
+
+  Widget _buildErrorState(String error) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(28),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(26),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.purple.withOpacity(0.08),
+                blurRadius: 18,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 76,
+                height: 76,
+                decoration: BoxDecoration(
+                  color: Colors.red.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(24),
+                ),
+                child: const Icon(
+                  Icons.error_outline_rounded,
+                  size: 42,
+                  color: Colors.red,
+                ),
+              ),
+              const SizedBox(height: 18),
+              const Text(
+                'Không tải được Daily Match',
+                style: TextStyle(fontSize: 21, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                error,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.black54,
+                  fontSize: 14,
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 18),
+              ElevatedButton.icon(
+                onPressed: refreshMatches,
+                icon: const Icon(Icons.refresh_rounded),
+                label: const Text('Thử lại'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF7B61FF),
+                  foregroundColor: Colors.white,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _buildEmptyMatches() {
@@ -696,17 +894,27 @@ class _DailyMatchScreenState extends State<DailyMatchScreen> {
               ),
               const SizedBox(height: 18),
               const Text(
-                'Không còn match nào',
+                'Chưa có match nào',
                 style: TextStyle(fontSize: 21, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 8),
               const Text(
-                'Những người bạn đã ẩn hoặc đã block sẽ không còn xuất hiện trong Daily Match.',
+                'Hiện chưa có user khác trong Firestore hoặc những người đó đã bị ẩn/block. Hãy đăng ký thêm tài khoản khác để test Daily Match.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: Colors.black54,
                   fontSize: 14,
                   height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 18),
+              ElevatedButton.icon(
+                onPressed: refreshMatches,
+                icon: const Icon(Icons.refresh_rounded),
+                label: const Text('Tải lại'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF7B61FF),
+                  foregroundColor: Colors.white,
                 ),
               ),
             ],
@@ -715,4 +923,11 @@ class _DailyMatchScreenState extends State<DailyMatchScreen> {
       ),
     );
   }
+}
+
+class _DailyMatchData {
+  final UserProfile currentUser;
+  final List<MatchResult> matches;
+
+  _DailyMatchData({required this.currentUser, required this.matches});
 }

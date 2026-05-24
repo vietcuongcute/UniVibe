@@ -4,13 +4,26 @@ import '../models/chat_room.dart';
 import '../models/vibe_signal.dart';
 import '../services/chat_service.dart';
 import '../services/signal_service.dart';
+import '../services/auth_service.dart';
+import 'auth_gate.dart';
 import 'chats_screen.dart';
 import 'daily_match_screen.dart';
 import 'daily_poll_screen.dart';
 import 'signals_screen.dart';
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  @override
+  void initState() {
+    super.initState();
+    SignalService.loadCurrentUserSignals();
+  }
 
   void _goToScreen(BuildContext context, Widget screen) {
     Navigator.push(context, MaterialPageRoute(builder: (context) => screen));
@@ -18,6 +31,48 @@ class HomeScreen extends StatelessWidget {
 
   int _getPendingReceivedSignalCount(List<VibeSignal> signals) {
     return signals.where((signal) => signal.status == 'pending').length;
+  }
+
+  Future<void> _logout(BuildContext context) async {
+    final shouldLogout = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Đăng xuất'),
+          content: const Text('Bạn có chắc muốn đăng xuất khỏi UniVibe không?'),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context, false);
+              },
+              child: const Text('Hủy'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(context, true);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF7B61FF),
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Đăng xuất'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (shouldLogout != true) return;
+
+    await AuthService.logout();
+
+    if (!context.mounted) return;
+
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => const AuthGate()),
+      (route) => false,
+    );
   }
 
   @override
@@ -177,6 +232,8 @@ class HomeScreen extends StatelessWidget {
             ],
           ),
         ),
+
+        // Nút thông báo
         InkWell(
           borderRadius: BorderRadius.circular(14),
           onTap: () {
@@ -227,6 +284,25 @@ class HomeScreen extends StatelessWidget {
                   ),
                 ),
             ],
+          ),
+        ),
+
+        const SizedBox(width: 10),
+
+        // Nút đăng xuất
+        InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: () {
+            _logout(context);
+          },
+          child: Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.18),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: const Icon(Icons.logout_rounded, color: Colors.white),
           ),
         ),
       ],

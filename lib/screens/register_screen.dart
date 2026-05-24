@@ -1,5 +1,7 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../services/auth_service.dart';
 import 'create_profile_screen.dart';
 import 'login_screen.dart';
 
@@ -18,39 +20,70 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool isLoading = false;
   bool obscurePassword = true;
 
-  void register() {
+  Future<void> register() async {
     final name = nameController.text.trim();
     final email = emailController.text.trim();
     final password = passwordController.text.trim();
 
     if (name.isEmpty || email.isEmpty || password.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Vui lòng nhập đủ thông tin'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      showMessage('Vui lòng nhập đủ thông tin');
       return;
     }
 
-    setState(() => isLoading = true);
+    if (password.length < 6) {
+      showMessage('Mật khẩu phải có ít nhất 6 ký tự');
+      return;
+    }
 
-    Future.delayed(const Duration(seconds: 1), () {
+    try {
+      setState(() => isLoading = true);
+
+      await AuthService.register(email: email, password: password);
+
       if (!mounted) return;
-
-      setState(() => isLoading = false);
 
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (_) => const CreateProfileScreen()),
+        MaterialPageRoute(
+          builder: (_) => CreateProfileScreen(initialNickname: name),
+        ),
       );
-    });
+    } on FirebaseAuthException catch (e) {
+      showMessage(_getRegisterErrorMessage(e));
+    } catch (e) {
+      showMessage('Đăng ký thất bại: $e');
+    } finally {
+      if (mounted) {
+        setState(() => isLoading = false);
+      }
+    }
+  }
+
+  String _getRegisterErrorMessage(FirebaseAuthException e) {
+    switch (e.code) {
+      case 'email-already-in-use':
+        return 'Email này đã được sử dụng';
+      case 'invalid-email':
+        return 'Email không hợp lệ';
+      case 'weak-password':
+        return 'Mật khẩu quá yếu';
+      case 'operation-not-allowed':
+        return 'Firebase chưa bật Email/Password Auth';
+      default:
+        return 'Đăng ký thất bại: ${e.message ?? e.code}';
+    }
   }
 
   void goToLogin() {
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(builder: (_) => const LoginScreen()),
+    );
+  }
+
+  void showMessage(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
     );
   }
 
@@ -202,16 +235,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
               ),
             ),
             const SizedBox(height: 24),
-
             _buildTextField(
               controller: nameController,
               label: 'Nickname',
               hint: 'Ví dụ: Minh Anh',
               icon: Icons.badge_rounded,
             ),
-
             const SizedBox(height: 16),
-
             _buildTextField(
               controller: emailController,
               label: 'Email sinh viên',
@@ -219,9 +249,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
               icon: Icons.email_rounded,
               keyboardType: TextInputType.emailAddress,
             ),
-
             const SizedBox(height: 16),
-
             _buildTextField(
               controller: passwordController,
               label: 'Mật khẩu',
@@ -242,9 +270,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 ),
               ),
             ),
-
             const SizedBox(height: 18),
-
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(14),
@@ -273,9 +299,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 ],
               ),
             ),
-
             const SizedBox(height: 22),
-
             SizedBox(
               width: double.infinity,
               height: 54,
@@ -308,9 +332,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       ),
               ),
             ),
-
             const SizedBox(height: 16),
-
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
