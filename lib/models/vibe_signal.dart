@@ -1,6 +1,7 @@
 class VibeSignal {
   final String id;
   final String senderId;
+  final String senderName;
   final String receiverId;
   final String receiverName;
   final String type;
@@ -11,6 +12,7 @@ class VibeSignal {
   VibeSignal({
     required this.id,
     required this.senderId,
+    required this.senderName,
     required this.receiverId,
     required this.receiverName,
     required this.type,
@@ -18,4 +20,18 @@ class VibeSignal {
     required this.status,
     required this.createdAt,
   });
+
+  VibeSignal copyWith({String? status}) {
+    return VibeSignal(
+      id: id,
+      senderId: senderId,
+      senderName: senderName,
+      receiverId: receiverId,
+      receiverName: receiverName,
+      type: type,
+      message: message,
+      status: status ?? this.status,
+      createdAt: createdAt,
+    );
+  }
 }

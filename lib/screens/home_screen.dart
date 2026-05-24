@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 
+import '../models/chat_room.dart';
+import '../models/vibe_signal.dart';
+import '../services/chat_service.dart';
+import '../services/signal_service.dart';
+import 'chats_screen.dart';
 import 'daily_match_screen.dart';
-import 'signals_screen.dart';
-import 'blind_chat_screen.dart';
 import 'daily_poll_screen.dart';
+import 'signals_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -12,28 +16,63 @@ class HomeScreen extends StatelessWidget {
     Navigator.push(context, MaterialPageRoute(builder: (context) => screen));
   }
 
+  int _getPendingReceivedSignalCount(List<VibeSignal> signals) {
+    return signals.where((signal) => signal.status == 'pending').length;
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFFF7F3FF),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          child: Column(
-            children: [
-              _buildHeader(context),
-              const SizedBox(height: 18),
-              _buildTodayCard(),
-              const SizedBox(height: 18),
-              _buildFeatureSection(context),
-              const SizedBox(height: 24),
-            ],
-          ),
-        ),
-      ),
+    return ValueListenableBuilder<List<VibeSignal>>(
+      valueListenable: SignalService.receivedSignalsNotifier,
+      builder: (context, receivedSignals, child) {
+        return ValueListenableBuilder<List<ChatRoom>>(
+          valueListenable: ChatService.chatRoomsNotifier,
+          builder: (context, chatRooms, child) {
+            final pendingSignalCount = _getPendingReceivedSignalCount(
+              receivedSignals,
+            );
+            final chatCount = chatRooms.length;
+            final totalNotificationCount = pendingSignalCount + chatCount;
+
+            return Scaffold(
+              backgroundColor: const Color(0xFFF7F3FF),
+              body: SafeArea(
+                child: SingleChildScrollView(
+                  child: Column(
+                    children: [
+                      _buildHeader(
+                        context: context,
+                        totalNotificationCount: totalNotificationCount,
+                      ),
+                      const SizedBox(height: 18),
+                      _buildTodayCard(
+                        pendingSignalCount: pendingSignalCount,
+                        chatCount: chatCount,
+                      ),
+                      const SizedBox(height: 18),
+                      _buildFeatureSection(
+                        context: context,
+                        pendingSignalCount: pendingSignalCount,
+                        chatCount: chatCount,
+                      ),
+                      const SizedBox(height: 24),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 
-  Widget _buildHeader(BuildContext context) {
+  Widget _buildHeader({
+    required BuildContext context,
+    required int totalNotificationCount,
+  }) {
+    final bool hasNotification = totalNotificationCount > 0;
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(20, 22, 20, 26),
@@ -51,7 +90,11 @@ class HomeScreen extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildTopBar(),
+          _buildTopBar(
+            context: context,
+            hasNotification: hasNotification,
+            totalNotificationCount: totalNotificationCount,
+          ),
           const SizedBox(height: 28),
           const Text(
             'UniVibe',
@@ -81,7 +124,7 @@ class HomeScreen extends StatelessWidget {
                 Icon(Icons.auto_awesome, color: Colors.white, size: 18),
                 SizedBox(width: 8),
                 Text(
-                  'Hôm nay có 5 vibe phù hợp với bạn',
+                  'Kết nối an toàn bằng Mutual Signal',
                   style: TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.w600,
@@ -95,7 +138,11 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildTopBar() {
+  Widget _buildTopBar({
+    required BuildContext context,
+    required bool hasNotification,
+    required int totalNotificationCount,
+  }) {
     return Row(
       children: [
         const CircleAvatar(
@@ -116,7 +163,7 @@ class HomeScreen extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Xin chào 👋',
+                'Xin chào',
                 style: TextStyle(color: Colors.white70, fontSize: 13),
               ),
               SizedBox(height: 2),
@@ -130,20 +177,80 @@ class HomeScreen extends StatelessWidget {
             ],
           ),
         ),
-        Container(
-          width: 42,
-          height: 42,
-          decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.18),
-            borderRadius: BorderRadius.circular(14),
+        InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: () {
+            _goToScreen(context, const SignalsScreen());
+          },
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.18),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(
+                  Icons.notifications_none,
+                  color: Colors.white,
+                ),
+              ),
+              if (hasNotification)
+                Positioned(
+                  right: -4,
+                  top: -5,
+                  child: Container(
+                    constraints: const BoxConstraints(
+                      minWidth: 20,
+                      minHeight: 20,
+                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFF3B30),
+                      borderRadius: BorderRadius.circular(100),
+                      border: Border.all(color: Colors.white, width: 2),
+                    ),
+                    child: Center(
+                      child: Text(
+                        totalNotificationCount > 9
+                            ? '9+'
+                            : totalNotificationCount.toString(),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
           ),
-          child: const Icon(Icons.notifications_none, color: Colors.white),
         ),
       ],
     );
   }
 
-  Widget _buildTodayCard() {
+  Widget _buildTodayCard({
+    required int pendingSignalCount,
+    required int chatCount,
+  }) {
+    String title = 'Daily Vibe';
+    String subtitle =
+        'Khám phá match, gửi signal, mở chat khi hai bên cùng đồng ý.';
+
+    if (pendingSignalCount > 0) {
+      title = 'Bạn có $pendingSignalCount signal mới';
+      subtitle =
+          'Có người đã gửi tín hiệu kết nối cho bạn. Vào Vibe Signals để signal lại nếu thấy hợp vibe.';
+    } else if (chatCount > 0) {
+      title = 'Bạn có $chatCount phòng chat';
+      subtitle =
+          'Các phòng chat được mở sau khi hai bên cùng gửi signal cho nhau.';
+    }
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
       child: Container(
@@ -160,26 +267,37 @@ class HomeScreen extends StatelessWidget {
             ),
           ],
         ),
-        child: const Row(
+        child: Row(
           children: [
             CircleAvatar(
               radius: 28,
-              backgroundColor: Color(0xFFFFEEF6),
-              child: Icon(Icons.favorite, color: Color(0xFFE91E63), size: 28),
+              backgroundColor: pendingSignalCount > 0
+                  ? const Color(0xFFFFF3E0)
+                  : const Color(0xFFFFEEF6),
+              child: Icon(
+                pendingSignalCount > 0 ? Icons.bolt_rounded : Icons.favorite,
+                color: pendingSignalCount > 0
+                    ? const Color(0xFFFF9800)
+                    : const Color(0xFFE91E63),
+                size: 28,
+              ),
             ),
-            SizedBox(width: 14),
+            const SizedBox(width: 14),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Daily Vibe',
-                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+                    title,
+                    style: const TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
-                  SizedBox(height: 5),
+                  const SizedBox(height: 5),
                   Text(
-                    'Khám phá match, signal, blind chat và poll vui mỗi ngày.',
-                    style: TextStyle(
+                    subtitle,
+                    style: const TextStyle(
                       color: Colors.black54,
                       fontSize: 13,
                       height: 1.35,
@@ -194,7 +312,11 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildFeatureSection(BuildContext context) {
+  Widget _buildFeatureSection({
+    required BuildContext context,
+    required int pendingSignalCount,
+    required int chatCount,
+  }) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
       child: Column(
@@ -205,7 +327,6 @@ class HomeScreen extends StatelessWidget {
             style: TextStyle(fontSize: 21, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 14),
-
           _buildFeatureCard(
             context: context,
             title: 'Daily Match',
@@ -214,25 +335,28 @@ class HomeScreen extends StatelessWidget {
             color: const Color(0xFF7B61FF),
             screen: const DailyMatchScreen(),
           ),
-
           _buildFeatureCard(
             context: context,
             title: 'Vibe Signals',
-            subtitle: 'Gửi tín hiệu quan tâm nhẹ cho người bạn thấy hợp vibe.',
+            subtitle: pendingSignalCount > 0
+                ? 'Bạn có $pendingSignalCount signal đang chờ phản hồi.'
+                : 'Xem signal đã nhận, đã gửi và signal lại.',
             icon: Icons.bolt_rounded,
             color: const Color(0xFFFF9800),
             screen: const SignalsScreen(),
+            badgeCount: pendingSignalCount,
           ),
-
           _buildFeatureCard(
             context: context,
-            title: 'Blind Chat',
-            subtitle: 'Trò chuyện ẩn danh 10 phút, reveal khi cả hai đồng ý.',
+            title: 'Chats',
+            subtitle: chatCount > 0
+                ? 'Bạn đang có $chatCount phòng chat đã mutual signal.'
+                : 'Trò chuyện với những người đã mutual signal.',
             icon: Icons.chat_bubble_rounded,
             color: const Color(0xFF00A8CC),
-            screen: const BlindChatScreen(),
+            screen: const ChatsScreen(),
+            badgeCount: chatCount,
           ),
-
           _buildFeatureCard(
             context: context,
             title: 'Daily Poll',
@@ -254,6 +378,7 @@ class HomeScreen extends StatelessWidget {
     required IconData icon,
     required Color color,
     required Widget screen,
+    int badgeCount = 0,
   }) {
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
@@ -279,26 +404,85 @@ class HomeScreen extends StatelessWidget {
             ),
             child: Row(
               children: [
-                Container(
-                  width: 56,
-                  height: 56,
-                  decoration: BoxDecoration(
-                    color: color.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(18),
-                  ),
-                  child: Icon(icon, color: color, size: 30),
+                Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Container(
+                      width: 56,
+                      height: 56,
+                      decoration: BoxDecoration(
+                        color: color.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                      child: Icon(icon, color: color, size: 30),
+                    ),
+                    if (badgeCount > 0)
+                      Positioned(
+                        right: -7,
+                        top: -7,
+                        child: Container(
+                          constraints: const BoxConstraints(
+                            minWidth: 22,
+                            minHeight: 22,
+                          ),
+                          padding: const EdgeInsets.symmetric(horizontal: 7),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFF3B30),
+                            borderRadius: BorderRadius.circular(100),
+                            border: Border.all(color: Colors.white, width: 2),
+                          ),
+                          child: Center(
+                            child: Text(
+                              badgeCount > 9 ? '9+' : badgeCount.toString(),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
                 const SizedBox(width: 14),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        title,
-                        style: const TextStyle(
-                          fontSize: 17,
-                          fontWeight: FontWeight.bold,
-                        ),
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              title,
+                              style: const TextStyle(
+                                fontSize: 17,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                          if (badgeCount > 0) ...[
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFFF3B30).withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(100),
+                              ),
+                              child: const Text(
+                                'Mới',
+                                style: TextStyle(
+                                  color: Color(0xFFFF3B30),
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                       const SizedBox(height: 5),
                       Text(

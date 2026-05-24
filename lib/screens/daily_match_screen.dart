@@ -1,12 +1,10 @@
 import 'package:flutter/material.dart';
 
-import 'blind_chat_screen.dart';
-
 import '../data/mock_users.dart';
 import '../models/user_profile.dart';
 import '../services/block_service.dart';
+import '../services/hidden_match_service.dart';
 import '../services/match_service.dart';
-import '../services/report_service.dart';
 import '../services/signal_service.dart';
 
 class DailyMatchScreen extends StatefulWidget {
@@ -22,7 +20,10 @@ class _DailyMatchScreenState extends State<DailyMatchScreen> {
       currentUser: currentUser,
       users: mockUsers,
     ).where((match) {
-      return !BlockService.isBlocked(match.user.id);
+      final userId = match.user.id;
+
+      return !BlockService.isBlocked(userId) &&
+          !HiddenMatchService.isHidden(userId);
     }).toList();
   }
 
@@ -158,43 +159,36 @@ class _DailyMatchScreenState extends State<DailyMatchScreen> {
           ),
           const SizedBox(height: 8),
           const Text(
-            'Dựa trên mục tiêu, sở thích, ngành học và vibe tag của bạn.',
+            'Gửi signal trước. Chỉ khi hai bên cùng signal thì mới mở chat.',
             style: TextStyle(color: Colors.white70, fontSize: 14, height: 1.4),
           ),
           const SizedBox(height: 18),
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 10,
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.18),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: Colors.white.withOpacity(0.25)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.auto_awesome_rounded,
+                  color: Colors.white,
+                  size: 18,
                 ),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.18),
-                  borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: Colors.white.withOpacity(0.25)),
+                const SizedBox(width: 8),
+                Text(
+                  '$matchCount match khả dụng',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                  ),
                 ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(
-                      Icons.auto_awesome_rounded,
-                      color: Colors.white,
-                      size: 18,
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      '$matchCount match khả dụng',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 13,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
         ],
       ),
@@ -206,6 +200,8 @@ class _DailyMatchScreenState extends State<DailyMatchScreen> {
     required UserProfile user,
     required MatchResult match,
   }) {
+    final bool hasSentSignal = SignalService.hasSentSignalTo(user.id);
+
     return Container(
       margin: const EdgeInsets.only(bottom: 18),
       decoration: BoxDecoration(
@@ -261,42 +257,20 @@ class _DailyMatchScreenState extends State<DailyMatchScreen> {
                 Row(
                   children: [
                     Expanded(
-                      child: _buildPrimaryButton(
-                        label: 'Blind Chat',
-                        icon: Icons.chat_bubble_rounded,
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) =>
-                                  BlindChatScreen(otherUser: user),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _buildSecondaryButton(
-                        label: 'Signal',
-                        icon: Icons.bolt_rounded,
-                        onPressed: () {
-                          final result = SignalService.sendSignal(
-                            currentUser: currentUser,
-                            receiver: user,
-                          );
-
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(result),
-                              behavior: SnackBarBehavior.floating,
-                            ),
-                          );
-                        },
+                      child: _buildSignalButton(
+                        hasSentSignal: hasSentSignal,
+                        onPressed: hasSentSignal
+                            ? null
+                            : () {
+                                _showSignalDialog(
+                                  context: context,
+                                  receiver: user,
+                                );
+                              },
                       ),
                     ),
                     const SizedBox(width: 10),
-                    _buildMoreButton(context: context, user: user),
+                    _buildHideButton(context: context, user: user),
                   ],
                 ),
               ],
@@ -432,12 +406,12 @@ class _DailyMatchScreenState extends State<DailyMatchScreen> {
     );
   }
 
-  Widget _buildChipWrap(List<String> items, Color color) {
+  Widget _buildChipWrap(List items, Color color) {
     return Wrap(
       spacing: 8,
       runSpacing: 8,
       children: items.map((item) {
-        return _buildChip(item, color);
+        return _buildChip(item.toString(), color);
       }).toList(),
     );
   }
@@ -461,51 +435,62 @@ class _DailyMatchScreenState extends State<DailyMatchScreen> {
     );
   }
 
-  Widget _buildPrimaryButton({
-    required String label,
-    required IconData icon,
-    required VoidCallback onPressed,
+  Widget _buildSignalButton({
+    required bool hasSentSignal,
+    required VoidCallback? onPressed,
   }) {
     return ElevatedButton.icon(
       onPressed: onPressed,
-      icon: Icon(icon, size: 18),
-      label: Text(label),
+      icon: Icon(
+        hasSentSignal ? Icons.check_circle_rounded : Icons.bolt_rounded,
+        size: 19,
+      ),
+      label: Text(hasSentSignal ? 'Đã gửi Signal' : 'Gửi Signal'),
       style: ElevatedButton.styleFrom(
-        backgroundColor: const Color(0xFF7B61FF),
+        backgroundColor: hasSentSignal
+            ? Colors.grey.shade400
+            : const Color(0xFFFF9800),
         foregroundColor: Colors.white,
         elevation: 0,
-        padding: const EdgeInsets.symmetric(vertical: 14),
+        padding: const EdgeInsets.symmetric(vertical: 15),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       ),
     );
   }
 
-  Widget _buildSecondaryButton({
-    required String label,
-    required IconData icon,
-    required VoidCallback onPressed,
-  }) {
-    return OutlinedButton.icon(
-      onPressed: onPressed,
-      icon: Icon(icon, size: 18),
-      label: Text(label),
-      style: OutlinedButton.styleFrom(
-        foregroundColor: const Color(0xFFFF9800),
-        side: const BorderSide(color: Color(0xFFFF9800), width: 1.4),
-        padding: const EdgeInsets.symmetric(vertical: 14),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      ),
-    );
-  }
-
-  Widget _buildMoreButton({
+  Widget _buildHideButton({
     required BuildContext context,
     required UserProfile user,
   }) {
     return InkWell(
       borderRadius: BorderRadius.circular(16),
       onTap: () {
-        _showSafetyBottomSheet(context: context, user: user);
+        final result = HiddenMatchService.hideUser(user);
+
+        refreshMatches();
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(result),
+            behavior: SnackBarBehavior.floating,
+            action: SnackBarAction(
+              label: 'Hoàn tác',
+              textColor: Colors.white,
+              onPressed: () {
+                final undoResult = HiddenMatchService.unhideUser(user);
+
+                refreshMatches();
+
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(undoResult),
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+              },
+            ),
+          ),
+        );
       },
       child: Container(
         width: 50,
@@ -515,292 +500,164 @@ class _DailyMatchScreenState extends State<DailyMatchScreen> {
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: Colors.grey.shade300),
         ),
-        child: const Icon(Icons.more_horiz_rounded, color: Colors.black54),
+        child: const Icon(Icons.visibility_off_rounded, color: Colors.black54),
       ),
     );
   }
 
-  void _showSafetyBottomSheet({
+  void _showSignalDialog({
     required BuildContext context,
-    required UserProfile user,
+    required UserProfile receiver,
   }) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (bottomSheetContext) {
-        return Container(
-          padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.only(
-              topLeft: Radius.circular(28),
-              topRight: Radius.circular(28),
-            ),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 46,
-                height: 5,
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade300,
-                  borderRadius: BorderRadius.circular(100),
-                ),
-              ),
-              const SizedBox(height: 20),
-              Row(
-                children: [
-                  CircleAvatar(
-                    radius: 26,
-                    backgroundColor: const Color(0xFF7B61FF),
-                    child: Text(
-                      user.nickname[0].toUpperCase(),
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 20,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      user.nickname,
-                      style: const TextStyle(
-                        fontSize: 19,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 18),
-              _buildSafetyAction(
-                icon: Icons.flag_rounded,
-                color: const Color(0xFFFF9800),
-                title: 'Report user',
-                subtitle: 'Báo cáo hồ sơ hoặc hành vi không phù hợp.',
-                onTap: () {
-                  Navigator.pop(bottomSheetContext);
+    final defaultMessage = _getDefaultSignalMessage(receiver);
+    final messageController = TextEditingController(text: defaultMessage);
 
-                  _showReportDialog(context: context, user: user);
-                },
-              ),
-              const SizedBox(height: 12),
-              _buildSafetyAction(
-                icon: Icons.block_rounded,
-                color: const Color(0xFFE53935),
-                title: 'Block user',
-                subtitle: 'Ẩn người này khỏi Daily Match của bạn.',
-                onTap: () {
-                  Navigator.pop(bottomSheetContext);
-
-                  final result = BlockService.blockUser(user);
-
-                  refreshMatches();
-
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(result),
-                      behavior: SnackBarBehavior.floating,
-                      action: SnackBarAction(
-                        label: 'Hoàn tác',
-                        textColor: Colors.white,
-                        onPressed: () {
-                          final undoResult = BlockService.unblockUser(user);
-
-                          refreshMatches();
-
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(undoResult),
-                              behavior: SnackBarBehavior.floating,
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildSafetyAction({
-    required IconData icon,
-    required Color color,
-    required String title,
-    required String subtitle,
-    required VoidCallback onTap,
-  }) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(18),
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: color.withOpacity(0.08),
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: color.withOpacity(0.16)),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: color.withOpacity(0.14),
-                borderRadius: BorderRadius.circular(15),
-              ),
-              child: Icon(icon, color: color),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: TextStyle(
-                      color: color,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 15,
-                    ),
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    subtitle,
-                    style: const TextStyle(
-                      color: Colors.black54,
-                      fontSize: 12.5,
-                      height: 1.3,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _showReportDialog({
-    required BuildContext context,
-    required UserProfile user,
-  }) {
-    String selectedReason = 'Hồ sơ không phù hợp';
-    final detailController = TextEditingController();
-
-    final List<String> reasons = [
-      'Hồ sơ không phù hợp',
-      'Tin nhắn làm phiền',
-      'Giả mạo danh tính',
-      'Nội dung phản cảm',
-      'Khác',
+    final quickMessages = [
+      defaultMessage,
+      'Mình thấy tụi mình có nhiều điểm chung, kết nối nhé!',
+      'Bạn có vẻ cùng vibe với mình!',
+      'Hôm nào mình học hoặc đi event chung nhé!',
     ];
 
     showDialog(
       context: context,
       builder: (dialogContext) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(22),
+        return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+          ),
+          title: Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFF9800).withOpacity(0.14),
+                  borderRadius: BorderRadius.circular(15),
+                ),
+                child: const Icon(Icons.bolt_rounded, color: Color(0xFFFF9800)),
               ),
-              title: const Text('Report user'),
-              content: SingleChildScrollView(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Bạn muốn báo cáo ${user.nickname} vì lý do gì?',
-                      style: const TextStyle(
-                        color: Colors.black54,
-                        height: 1.35,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    DropdownButtonFormField<String>(
-                      value: selectedReason,
-                      decoration: InputDecoration(
-                        labelText: 'Lý do',
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                      ),
-                      items: reasons.map((reason) {
-                        return DropdownMenuItem(
-                          value: reason,
-                          child: Text(reason),
-                        );
-                      }).toList(),
-                      onChanged: (value) {
-                        if (value != null) {
-                          setDialogState(() {
-                            selectedReason = value;
-                          });
-                        }
-                      },
-                    ),
-                    const SizedBox(height: 14),
-                    TextField(
-                      controller: detailController,
-                      maxLines: 3,
-                      decoration: InputDecoration(
-                        labelText: 'Mô tả thêm',
-                        hintText: 'Nhập thêm chi tiết nếu cần...',
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                      ),
-                    ),
-                  ],
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text(
+                  'Gửi Signal',
+                  style: TextStyle(fontWeight: FontWeight.bold),
                 ),
               ),
-              actions: [
-                TextButton(
-                  onPressed: () {
-                    Navigator.pop(dialogContext);
-                  },
-                  child: const Text('Hủy'),
-                ),
-                ElevatedButton(
-                  onPressed: () {
-                    final result = ReportService.reportUser(
-                      currentUser: currentUser,
-                      targetUser: user,
-                      reason: selectedReason,
-                      detail: detailController.text.trim(),
-                    );
-
-                    Navigator.pop(dialogContext);
-
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(result),
-                        behavior: SnackBarBehavior.floating,
-                      ),
-                    );
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFFF9800),
-                    foregroundColor: Colors.white,
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Gửi một lời nhắn ngắn cho ${receiver.nickname}. Nếu bạn ấy signal lại, hai bạn sẽ mở được phòng chat.',
+                  style: const TextStyle(
+                    color: Colors.black54,
+                    fontSize: 14,
+                    height: 1.4,
                   ),
-                  child: const Text('Gửi report'),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: messageController,
+                  maxLines: 3,
+                  decoration: InputDecoration(
+                    labelText: 'Lời nhắn',
+                    hintText: 'Nhập lời nhắn...',
+                    filled: true,
+                    fillColor: const Color(0xFFF7F3FF),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                const Text(
+                  'Chọn nhanh',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: quickMessages.map((message) {
+                    return ActionChip(
+                      label: Text(
+                        message,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      onPressed: () {
+                        messageController.text = message;
+                      },
+                    );
+                  }).toList(),
                 ),
               ],
-            );
-          },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(dialogContext);
+              },
+              child: const Text('Hủy'),
+            ),
+            ElevatedButton.icon(
+              onPressed: () {
+                final result = SignalService.sendSignal(
+                  currentUser: currentUser,
+                  receiver: receiver,
+                  message: messageController.text.trim().isEmpty
+                      ? defaultMessage
+                      : messageController.text.trim(),
+                );
+
+                Navigator.pop(dialogContext);
+
+                setState(() {});
+
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(result),
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+              },
+              icon: const Icon(Icons.send_rounded, size: 18),
+              label: const Text('Gửi'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFFF9800),
+                foregroundColor: Colors.white,
+              ),
+            ),
+          ],
         );
       },
     );
+  }
+
+  String _getDefaultSignalMessage(UserProfile receiver) {
+    final goals = receiver.goals.map((goal) => goal.toString()).toList();
+
+    if (goals.contains('Study Buddy')) {
+      return 'Mình thấy bạn hợp vibe học chung, kết nối nhé!';
+    }
+
+    if (goals.contains('Food Buddy')) {
+      return 'Mình thấy bạn cũng thích đi ăn, hôm nào đi chung nhé!';
+    }
+
+    if (goals.contains('Game Buddy')) {
+      return 'Bạn có vẻ cùng vibe chơi game với mình!';
+    }
+
+    if (goals.contains('Event Buddy')) {
+      return 'Mình muốn tìm bạn đi event/workshop chung, kết nối nhé!';
+    }
+
+    return 'Bạn có vẻ cùng vibe với mình!';
   }
 
   Widget _buildEmptyMatches() {
@@ -844,7 +701,7 @@ class _DailyMatchScreenState extends State<DailyMatchScreen> {
               ),
               const SizedBox(height: 8),
               const Text(
-                'Những người bạn đã block sẽ không còn xuất hiện trong Daily Match.',
+                'Những người bạn đã ẩn hoặc đã block sẽ không còn xuất hiện trong Daily Match.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: Colors.black54,
