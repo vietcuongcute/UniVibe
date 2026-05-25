@@ -120,7 +120,7 @@ class _DailyPollScreenState extends State<DailyPollScreen> {
                   width: 42,
                   height: 42,
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.18),
+                    color: Colors.white.withValues(alpha: 0.18),
                     shape: BoxShape.circle,
                   ),
                   child: const Icon(
@@ -145,7 +145,7 @@ class _DailyPollScreenState extends State<DailyPollScreen> {
                 width: 42,
                 height: 42,
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.18),
+                  color: Colors.white.withValues(alpha: 0.18),
                   shape: BoxShape.circle,
                 ),
                 child: const Icon(Icons.poll_rounded, color: Colors.white),
@@ -171,9 +171,9 @@ class _DailyPollScreenState extends State<DailyPollScreen> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.18),
+              color: Colors.white.withValues(alpha: 0.18),
               borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: Colors.white.withOpacity(0.25)),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.25)),
             ),
             child: const Row(
               mainAxisSize: MainAxisSize.min,
@@ -205,7 +205,7 @@ class _DailyPollScreenState extends State<DailyPollScreen> {
         borderRadius: BorderRadius.circular(26),
         boxShadow: [
           BoxShadow(
-            color: Colors.purple.withOpacity(0.08),
+            color: Colors.purple.withValues(alpha: 0.08),
             blurRadius: 18,
             offset: const Offset(0, 8),
           ),
@@ -218,7 +218,7 @@ class _DailyPollScreenState extends State<DailyPollScreen> {
             width: 54,
             height: 54,
             decoration: BoxDecoration(
-              color: const Color(0xFFE91E63).withOpacity(0.12),
+              color: const Color(0xFFE91E63).withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(18),
             ),
             child: const Icon(
@@ -259,7 +259,7 @@ class _DailyPollScreenState extends State<DailyPollScreen> {
             borderRadius: BorderRadius.circular(22),
             boxShadow: [
               BoxShadow(
-                color: Colors.purple.withOpacity(0.06),
+                color: Colors.purple.withValues(alpha: 0.06),
                 blurRadius: 14,
                 offset: const Offset(0, 6),
               ),
@@ -271,7 +271,7 @@ class _DailyPollScreenState extends State<DailyPollScreen> {
                 width: 38,
                 height: 38,
                 decoration: BoxDecoration(
-                  color: const Color(0xFF7B61FF).withOpacity(0.1),
+                  color: const Color(0xFF7B61FF).withValues(alpha: 0.1),
                   shape: BoxShape.circle,
                 ),
                 child: const Icon(
@@ -322,7 +322,7 @@ class _DailyPollScreenState extends State<DailyPollScreen> {
         ),
         boxShadow: [
           BoxShadow(
-            color: activeColor.withOpacity(0.08),
+            color: activeColor.withValues(alpha: 0.08),
             blurRadius: 16,
             offset: const Offset(0, 8),
           ),
@@ -337,7 +337,7 @@ class _DailyPollScreenState extends State<DailyPollScreen> {
                 width: 38,
                 height: 38,
                 decoration: BoxDecoration(
-                  color: activeColor.withOpacity(0.12),
+                  color: activeColor.withValues(alpha: 0.12),
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
@@ -408,7 +408,7 @@ class _DailyPollScreenState extends State<DailyPollScreen> {
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Colors.purple.withOpacity(0.18),
+            color: Colors.purple.withValues(alpha: 0.18),
             blurRadius: 14,
             offset: const Offset(0, 7),
           ),

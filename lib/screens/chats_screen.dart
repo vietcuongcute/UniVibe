@@ -1,18 +1,41 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_slidable/flutter_slidable.dart';
 
-import '../models/chat_room.dart';
-import '../services/block_service.dart';
-import '../services/chat_service.dart';
 import 'chat_detail_screen.dart';
 
-class ChatsScreen extends StatelessWidget {
+class ChatsScreen extends StatefulWidget {
   const ChatsScreen({super.key});
 
-  List<ChatRoom> _getVisibleChatRooms(List<ChatRoom> rooms) {
-    return rooms.where((room) {
-      return !BlockService.isBlocked(room.otherUser.id);
-    }).toList();
+  @override
+  State<ChatsScreen> createState() => _ChatsScreenState();
+}
+
+class _ChatsScreenState extends State<ChatsScreen> {
+  String get currentUserId => FirebaseAuth.instance.currentUser?.uid ?? '';
+
+  Stream<List<_ChatRoomViewData>> _chatRoomsStream() {
+    if (currentUserId.isEmpty) {
+      return Stream.value([]);
+    }
+
+    return FirebaseFirestore.instance
+        .collection('chatRooms')
+        .where('userIds', arrayContains: currentUserId)
+        .snapshots()
+        .map((snapshot) {
+          final rooms = snapshot.docs.map((doc) {
+            return _ChatRoomViewData.fromDoc(doc, currentUserId: currentUserId);
+          }).toList();
+
+          rooms.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+          return rooms;
+        });
+  }
+
+  Future<void> _refresh() async {
+    setState(() {});
+    await Future.delayed(const Duration(milliseconds: 350));
   }
 
   @override
@@ -24,23 +47,42 @@ class ChatsScreen extends StatelessWidget {
           children: [
             _buildHeader(context),
             Expanded(
-              child: ValueListenableBuilder<List<ChatRoom>>(
-                valueListenable: ChatService.chatRoomsNotifier,
-                builder: (context, rooms, child) {
-                  final visibleRooms = _getVisibleChatRooms(rooms);
-
-                  if (visibleRooms.isEmpty) {
-                    return _buildEmptyState();
+              child: StreamBuilder<List<_ChatRoomViewData>>(
+                stream: _chatRoomsStream(),
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const Center(
+                      child: CircularProgressIndicator(
+                        color: Color(0xFF7B61FF),
+                      ),
+                    );
                   }
 
-                  return ListView.builder(
-                    padding: const EdgeInsets.fromLTRB(18, 16, 18, 24),
-                    itemCount: visibleRooms.length,
-                    itemBuilder: (context, index) {
-                      final room = visibleRooms[index];
+                  if (snapshot.hasError) {
+                    return _buildErrorState(snapshot.error.toString());
+                  }
 
-                      return _buildSlidableChatRoomCard(context, room);
-                    },
+                  final rooms = snapshot.data ?? [];
+
+                  return RefreshIndicator(
+                    onRefresh: _refresh,
+                    child: rooms.isEmpty
+                        ? ListView(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            children: [
+                              const SizedBox(height: 90),
+                              _buildEmptyState(),
+                            ],
+                          )
+                        : ListView.builder(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            padding: const EdgeInsets.fromLTRB(18, 16, 18, 24),
+                            itemCount: rooms.length,
+                            itemBuilder: (context, index) {
+                              final room = rooms[index];
+                              return _buildChatCard(context, room);
+                            },
+                          ),
                   );
                 },
               ),
@@ -101,16 +143,17 @@ class ChatsScreen extends StatelessWidget {
                   ),
                 ),
               ),
-              Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.18),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.chat_bubble_rounded,
-                  color: Colors.white,
+              InkWell(
+                borderRadius: BorderRadius.circular(100),
+                onTap: _refresh,
+                child: Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.18),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.refresh_rounded, color: Colors.white),
                 ),
               ),
             ],
@@ -127,7 +170,7 @@ class ChatsScreen extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           const Text(
-            'Vuốt sang trái trên mobile, hoặc bấm nút ... để xoá đoạn chat.',
+            'Phòng chat chỉ mở khi hai bên đã mutual signal.',
             style: TextStyle(color: Colors.white70, fontSize: 14, height: 1.4),
           ),
         ],
@@ -135,430 +178,323 @@ class ChatsScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildSlidableChatRoomCard(BuildContext context, ChatRoom room) {
+  Widget _buildChatCard(BuildContext context, _ChatRoomViewData room) {
+    final avatarLetter = room.otherName.trim().isEmpty
+        ? 'U'
+        : room.otherName.trim()[0].toUpperCase();
+
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
-      child: Slidable(
-        key: ValueKey(room.id),
-        endActionPane: ActionPane(
-          motion: const DrawerMotion(),
-          extentRatio: 0.26,
-          children: [
-            CustomSlidableAction(
-              borderRadius: BorderRadius.circular(24),
-              backgroundColor: const Color(0xFFE53935),
-              foregroundColor: Colors.white,
-              onPressed: (slidableContext) {
-                _showDeleteConfirmDialog(context, room);
-              },
-              child: const Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.delete_rounded, color: Colors.white, size: 28),
-                  SizedBox(height: 4),
-                  Text(
-                    'Xoá',
-                    style: TextStyle(
+      child: Material(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(22),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(22),
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => ChatDetailScreen(chatRoomId: room.id),
+              ),
+            );
+          },
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(22),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.purple.withOpacity(0.08),
+                  blurRadius: 16,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                CircleAvatar(
+                  radius: 29,
+                  backgroundColor: const Color(0xFF00A8CC),
+                  child: Text(
+                    avatarLetter,
+                    style: const TextStyle(
                       color: Colors.white,
-                      fontSize: 13,
+                      fontSize: 23,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        child: _buildChatRoomCard(context, room),
-      ),
-    );
-  }
-
-  void _showDeleteConfirmDialog(BuildContext context, ChatRoom room) {
-    showDialog(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(24),
-          ),
-          title: Row(
-            children: [
-              Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFE53935).withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(15),
                 ),
-                child: const Icon(
-                  Icons.delete_rounded,
-                  color: Color(0xFFE53935),
-                ),
-              ),
-              const SizedBox(width: 12),
-              const Expanded(
-                child: Text(
-                  'Xoá đoạn chat?',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-              ),
-            ],
-          ),
-          content: Text(
-            'Bạn có chắc muốn xoá đoạn chat với ${room.otherUser.nickname}? Hành động này chỉ xoá trong dữ liệu mock hiện tại.',
-            style: const TextStyle(color: Colors.black54, height: 1.4),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.pop(dialogContext);
-              },
-              child: const Text('Hủy'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.pop(dialogContext);
-
-                final result = ChatService.deleteChatRoom(room);
-
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(result),
-                    behavior: SnackBarBehavior.floating,
-                    action: SnackBarAction(
-                      label: 'Hoàn tác',
-                      textColor: Colors.white,
-                      onPressed: () {
-                        final restoreResult = ChatService.restoreChatRoom(room);
-
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(restoreResult),
-                            behavior: SnackBarBehavior.floating,
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                );
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFE53935),
-                foregroundColor: Colors.white,
-              ),
-              child: const Text('Xoá'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _buildChatRoomCard(BuildContext context, ChatRoom room) {
-    return Material(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(24),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(24),
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => ChatDetailScreen(chatRoomId: room.id),
-            ),
-          );
-        },
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(24),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.purple.withOpacity(0.08),
-                blurRadius: 18,
-                offset: const Offset(0, 8),
-              ),
-            ],
-          ),
-          child: Row(
-            children: [
-              Stack(
-                children: [
-                  CircleAvatar(
-                    radius: 30,
-                    backgroundColor: const Color(0xFF7B61FF),
-                    child: Text(
-                      room.otherUser.nickname[0].toUpperCase(),
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                  Positioned(
-                    right: 0,
-                    bottom: 0,
-                    child: Container(
-                      width: 17,
-                      height: 17,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF4CAF50),
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white, width: 3),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      room.otherUser.nickname,
-                      style: const TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 5),
-                    Text(
-                      room.lastMessage,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.black54,
-                        fontSize: 13,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(
-                    _formatTime(room.updatedAt),
-                    style: TextStyle(
-                      color: Colors.grey.shade500,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  InkWell(
-                    borderRadius: BorderRadius.circular(100),
-                    onTap: () {
-                      _showChatOptionsBottomSheet(context, room);
-                    },
-                    child: Container(
-                      width: 34,
-                      height: 34,
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade100,
-                        shape: BoxShape.circle,
-                      ),
-                      child: Icon(
-                        Icons.more_horiz_rounded,
-                        size: 20,
-                        color: Colors.grey.shade700,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _showChatOptionsBottomSheet(BuildContext context, ChatRoom room) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (bottomSheetContext) {
-        return Container(
-          padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.only(
-              topLeft: Radius.circular(28),
-              topRight: Radius.circular(28),
-            ),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 46,
-                height: 5,
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade300,
-                  borderRadius: BorderRadius.circular(100),
-                ),
-              ),
-              const SizedBox(height: 20),
-              Row(
-                children: [
-                  CircleAvatar(
-                    radius: 26,
-                    backgroundColor: const Color(0xFF7B61FF),
-                    child: Text(
-                      room.otherUser.nickname[0].toUpperCase(),
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 20,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      room.otherUser.nickname,
-                      style: const TextStyle(
-                        fontSize: 19,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 18),
-              InkWell(
-                borderRadius: BorderRadius.circular(18),
-                onTap: () {
-                  Navigator.pop(bottomSheetContext);
-
-                  _showDeleteConfirmDialog(context, room);
-                },
-                child: Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFE53935).withOpacity(0.08),
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(
-                      color: const Color(0xFFE53935).withOpacity(0.16),
-                    ),
-                  ),
-                  child: const Row(
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      SizedBox(
-                        width: 44,
-                        height: 44,
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            color: Color(0xFFFFEBEE),
-                            borderRadius: BorderRadius.all(Radius.circular(15)),
-                          ),
-                          child: Icon(
-                            Icons.delete_rounded,
-                            color: Color(0xFFE53935),
-                          ),
+                      Text(
+                        room.otherName.isEmpty
+                            ? 'Người dùng UniVibe'
+                            : room.otherName,
+                        style: const TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
-                      SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Xoá đoạn chat',
-                              style: TextStyle(
-                                color: Color(0xFFE53935),
-                                fontWeight: FontWeight.bold,
-                                fontSize: 15,
-                              ),
-                            ),
-                            SizedBox(height: 3),
-                            Text(
-                              'Xoá đoạn chat này khỏi danh sách của bạn.',
-                              style: TextStyle(
-                                color: Colors.black54,
-                                fontSize: 12.5,
-                                height: 1.3,
-                              ),
-                            ),
-                          ],
+                      const SizedBox(height: 5),
+                      Text(
+                        room.lastMessage.isEmpty
+                            ? 'Hai bạn đã mutual signal 🎉'
+                            : room.lastMessage,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.black54,
+                          fontSize: 13,
+                          height: 1.35,
                         ),
                       ),
                     ],
                   ),
                 ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildEmptyState() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(28),
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(26),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.purple.withOpacity(0.08),
-                blurRadius: 18,
-                offset: const Offset(0, 8),
-              ),
-            ],
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 76,
-                height: 76,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF00A8CC).withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(24),
+                const SizedBox(width: 8),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      _formatTime(room.updatedAt),
+                      style: TextStyle(
+                        color: Colors.grey.shade500,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Icon(
+                      Icons.arrow_forward_ios_rounded,
+                      size: 16,
+                      color: Colors.grey.shade400,
+                    ),
+                  ],
                 ),
-                child: const Icon(
-                  Icons.chat_bubble_outline_rounded,
-                  size: 42,
-                  color: Color(0xFF00A8CC),
-                ),
-              ),
-              const SizedBox(height: 18),
-              const Text(
-                'Chưa có phòng chat',
-                style: TextStyle(fontSize: 21, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'Khi hai bên cùng gửi signal, phòng chat sẽ tự động xuất hiện ở đây.',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: Colors.black54,
-                  fontSize: 14,
-                  height: 1.45,
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  String _formatTime(DateTime time) {
-    final hour = time.hour.toString().padLeft(2, '0');
-    final minute = time.minute.toString().padLeft(2, '0');
+  Widget _buildEmptyState() {
+    return Padding(
+      padding: const EdgeInsets.all(28),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(26),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.purple.withOpacity(0.08),
+              blurRadius: 18,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 76,
+              height: 76,
+              decoration: BoxDecoration(
+                color: const Color(0xFF00A8CC).withOpacity(0.12),
+                borderRadius: BorderRadius.circular(24),
+              ),
+              child: const Icon(
+                Icons.chat_bubble_outline_rounded,
+                size: 42,
+                color: Color(0xFF00A8CC),
+              ),
+            ),
+            const SizedBox(height: 18),
+            const Text(
+              'Chưa có phòng chat',
+              style: TextStyle(fontSize: 21, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Khi bạn và một người cùng gửi signal cho nhau, phòng chat sẽ xuất hiện ở đây.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.black54,
+                fontSize: 14,
+                height: 1.4,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
-    return '$hour:$minute';
+  Widget _buildErrorState(String error) {
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      children: [
+        const SizedBox(height: 90),
+        Padding(
+          padding: const EdgeInsets.all(28),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(26),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.purple.withOpacity(0.08),
+                  blurRadius: 18,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 76,
+                  height: 76,
+                  decoration: BoxDecoration(
+                    color: Colors.red.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(24),
+                  ),
+                  child: const Icon(
+                    Icons.error_outline_rounded,
+                    size: 42,
+                    color: Colors.red,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                const Text(
+                  'Không tải được phòng chat',
+                  style: TextStyle(fontSize: 21, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  error,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.black54,
+                    fontSize: 14,
+                    height: 1.4,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                ElevatedButton.icon(
+                  onPressed: _refresh,
+                  icon: const Icon(Icons.refresh_rounded),
+                  label: const Text('Thử lại'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF7B61FF),
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  String _formatTime(DateTime time) {
+    final now = DateTime.now();
+    final difference = now.difference(time);
+
+    if (difference.inMinutes < 1) {
+      return 'Vừa xong';
+    }
+
+    if (difference.inMinutes < 60) {
+      return '${difference.inMinutes}p';
+    }
+
+    if (difference.inHours < 24) {
+      return '${difference.inHours}h';
+    }
+
+    if (difference.inDays < 7) {
+      return '${difference.inDays}d';
+    }
+
+    final day = time.day.toString().padLeft(2, '0');
+    final month = time.month.toString().padLeft(2, '0');
+
+    return '$day/$month';
+  }
+}
+
+class _ChatRoomViewData {
+  final String id;
+  final String otherUserId;
+  final String otherName;
+  final String lastMessage;
+  final DateTime updatedAt;
+
+  _ChatRoomViewData({
+    required this.id,
+    required this.otherUserId,
+    required this.otherName,
+    required this.lastMessage,
+    required this.updatedAt,
+  });
+
+  factory _ChatRoomViewData.fromDoc(
+    DocumentSnapshot<Map<String, dynamic>> doc, {
+    required String currentUserId,
+  }) {
+    final data = doc.data() ?? {};
+
+    DateTime readDate(dynamic value) {
+      if (value is Timestamp) return value.toDate();
+      if (value is DateTime) return value;
+      return DateTime.now();
+    }
+
+    final userIds = (data['userIds'] as List<dynamic>? ?? [])
+        .map((item) => item.toString())
+        .toList();
+
+    String otherUserId = '';
+
+    for (final id in userIds) {
+      if (id != currentUserId) {
+        otherUserId = id;
+        break;
+      }
+    }
+
+    final members = data['members'];
+
+    String otherName = 'Người dùng UniVibe';
+
+    if (members is Map && otherUserId.isNotEmpty) {
+      final otherMember = members[otherUserId];
+
+      if (otherMember is Map) {
+        final nickname = otherMember['nickname']?.toString() ?? '';
+
+        if (nickname.trim().isNotEmpty) {
+          otherName = nickname.trim();
+        }
+      }
+    }
+
+    return _ChatRoomViewData(
+      id: doc.id,
+      otherUserId: otherUserId,
+      otherName: otherName,
+      lastMessage: data['lastMessage']?.toString() ?? '',
+      updatedAt: readDate(data['updatedAt']),
+    );
   }
 }

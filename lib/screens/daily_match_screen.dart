@@ -254,8 +254,6 @@ class _DailyMatchScreenState extends State<DailyMatchScreen> {
     required UserProfile user,
     required MatchResult match,
   }) {
-    final bool hasSentSignal = SignalService.hasSentSignalTo(user.id);
-
     return Container(
       margin: const EdgeInsets.only(bottom: 18),
       decoration: BoxDecoration(
@@ -314,17 +312,53 @@ class _DailyMatchScreenState extends State<DailyMatchScreen> {
                 Row(
                   children: [
                     Expanded(
-                      child: _buildSignalButton(
-                        hasSentSignal: hasSentSignal,
-                        onPressed: hasSentSignal
-                            ? null
-                            : () {
-                                _showSignalDialog(
-                                  context: context,
-                                  currentUser: currentUser,
-                                  receiver: user,
-                                );
-                              },
+                      child: FutureBuilder<bool>(
+                        future: SignalService.hasSentSignalTo(
+                          currentUserId: currentUser.id,
+                          receiverId: user.id,
+                        ),
+                        builder: (context, snapshot) {
+                          final isChecking =
+                              snapshot.connectionState ==
+                              ConnectionState.waiting;
+                          final hasSentSignal = snapshot.data ?? false;
+
+                          if (isChecking) {
+                            return ElevatedButton.icon(
+                              onPressed: null,
+                              icon: const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              ),
+                              label: const Text('Đang kiểm tra...'),
+                              style: ElevatedButton.styleFrom(
+                                elevation: 0,
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 15,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                              ),
+                            );
+                          }
+
+                          return _buildSignalButton(
+                            hasSentSignal: hasSentSignal,
+                            onPressed: hasSentSignal
+                                ? null
+                                : () {
+                                    _showSignalDialog(
+                                      context: context,
+                                      currentUser: currentUser,
+                                      receiver: user,
+                                    );
+                                  },
+                          );
+                        },
                       ),
                     ),
                     const SizedBox(width: 10),
@@ -599,7 +633,7 @@ class _DailyMatchScreenState extends State<DailyMatchScreen> {
         bool isSending = false;
 
         return StatefulBuilder(
-          builder: (context, setDialogState) {
+          builder: (innerContext, setDialogState) {
             return AlertDialog(
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(24),
@@ -713,7 +747,7 @@ class _DailyMatchScreenState extends State<DailyMatchScreen> {
                                   },
                                 );
 
-                            if (!context.mounted) return;
+                            if (!mounted) return;
 
                             Navigator.pop(dialogContext);
 
@@ -726,7 +760,7 @@ class _DailyMatchScreenState extends State<DailyMatchScreen> {
                               ),
                             );
                           } catch (e) {
-                            if (!context.mounted) return;
+                            if (!mounted) return;
 
                             setDialogState(() {
                               isSending = false;

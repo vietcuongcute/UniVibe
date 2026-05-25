@@ -56,7 +56,7 @@ class WelcomeScreen extends StatelessWidget {
         borderRadius: BorderRadius.circular(34),
         boxShadow: [
           BoxShadow(
-            color: Colors.purple.withOpacity(0.22),
+            color: Colors.purple.withValues(alpha: 0.22),
             blurRadius: 28,
             offset: const Offset(0, 14),
           ),
@@ -102,9 +102,9 @@ class WelcomeScreen extends StatelessWidget {
             width: double.infinity,
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.14),
+              color: Colors.white.withValues(alpha: 0.14),
               borderRadius: BorderRadius.circular(22),
-              border: Border.all(color: Colors.white.withOpacity(0.2)),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
             ),
             child: const Row(
               children: [
@@ -138,7 +138,7 @@ class WelcomeScreen extends StatelessWidget {
         borderRadius: BorderRadius.circular(30),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.12),
+            color: Colors.black.withValues(alpha: 0.12),
             blurRadius: 18,
             offset: const Offset(0, 8),
           ),
@@ -233,9 +233,9 @@ class _WelcomeChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.16),
+        color: Colors.white.withValues(alpha: 0.16),
         borderRadius: BorderRadius.circular(100),
-        border: Border.all(color: Colors.white.withOpacity(0.22)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.22)),
       ),
       child: Text(
         text,

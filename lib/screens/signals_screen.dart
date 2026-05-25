@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../models/chat_room.dart';
 import '../models/user_profile.dart';
 import '../models/vibe_signal.dart';
-import '../services/chat_service.dart';
 import '../services/signal_service.dart';
 import '../services/user_profile_service.dart';
 import 'chat_detail_screen.dart';
@@ -21,17 +19,12 @@ class _SignalsScreenState extends State<SignalsScreen> {
   @override
   void initState() {
     super.initState();
-    currentUserFuture = _initData();
-  }
-
-  Future<UserProfile?> _initData() async {
-    await SignalService.loadCurrentUserSignals();
-    return UserProfileService.getCurrentUserProfile();
+    currentUserFuture = UserProfileService.getCurrentUserProfile();
   }
 
   Future<void> refreshSignals() async {
     setState(() {
-      currentUserFuture = _initData();
+      currentUserFuture = UserProfileService.getCurrentUserProfile();
     });
 
     await currentUserFuture;
@@ -97,14 +90,8 @@ class _SignalsScreenState extends State<SignalsScreen> {
 
     return TabBarView(
       children: [
-        RefreshIndicator(
-          onRefresh: refreshSignals,
-          child: _buildReceivedSignalsTab(context, currentUser),
-        ),
-        RefreshIndicator(
-          onRefresh: refreshSignals,
-          child: _buildSentSignalsTab(context),
-        ),
+        _buildReceivedSignalsTab(currentUser),
+        _buildSentSignalsTab(currentUser),
       ],
     );
   }
@@ -211,178 +198,125 @@ class _SignalsScreenState extends State<SignalsScreen> {
     );
   }
 
-  Widget _buildReceivedSignalsTab(
-    BuildContext context,
-    UserProfile currentUser,
-  ) {
-    return ValueListenableBuilder<List<VibeSignal>>(
-      valueListenable: SignalService.receivedSignalsNotifier,
-      builder: (context, signals, child) {
-        if (signals.isEmpty) {
-          return ListView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            children: [
-              const SizedBox(height: 80),
-              _buildEmptyState(
-                icon: Icons.inbox_rounded,
-                title: 'Chưa có signal đã nhận',
-                subtitle:
-                    'Khi có người thấy bạn hợp vibe và gửi signal, tín hiệu sẽ xuất hiện ở đây.',
-              ),
-            ],
+  Widget _buildReceivedSignalsTab(UserProfile currentUser) {
+    return StreamBuilder<List<VibeSignal>>(
+      stream: SignalService.receivedSignalsStream(currentUser.id),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(
+            child: CircularProgressIndicator(color: Color(0xFF7B61FF)),
           );
         }
 
-        return ListView.builder(
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(18, 16, 18, 24),
-          itemCount: signals.length,
-          itemBuilder: (context, index) {
-            final signal = signals[index];
+        if (snapshot.hasError) {
+          return _buildErrorState(snapshot.error.toString());
+        }
 
-            return _buildSignalCard(
-              context: context,
-              signal: signal,
-              titleName: signal.senderName,
-              isReceived: true,
-              onPrimaryAction: () {
-                if (signal.status == 'mutual') {
-                  _openChatFromSignal(
-                    context: context,
-                    otherUserId: signal.senderId,
-                  );
-                  return;
-                }
+        final signals = snapshot.data ?? [];
 
-                _showSignalBackDialog(
-                  context: context,
-                  currentUser: currentUser,
-                  signal: signal,
-                );
-              },
-              onDeclineAction: signal.status == 'pending'
-                  ? () async {
-                      final result = await SignalService.declineSignal(
-                        signal.id,
-                      );
+        return RefreshIndicator(
+          onRefresh: refreshSignals,
+          child: signals.isEmpty
+              ? ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  children: [
+                    const SizedBox(height: 80),
+                    _buildEmptyState(
+                      icon: Icons.inbox_rounded,
+                      title: 'Chưa có signal đã nhận',
+                      subtitle:
+                          'Khi có người thấy bạn hợp vibe và gửi signal, tín hiệu sẽ xuất hiện ở đây.',
+                    ),
+                  ],
+                )
+              : ListView.builder(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.fromLTRB(18, 16, 18, 24),
+                  itemCount: signals.length,
+                  itemBuilder: (context, index) {
+                    final signal = signals[index];
 
-                      await SignalService.loadCurrentUserSignals();
+                    return _buildSignalCard(
+                      context: context,
+                      signal: signal,
+                      titleName: signal.senderName,
+                      isReceived: true,
+                      onPrimaryAction: () {
+                        if (signal.status == 'mutual') {
+                          _openChatFromSignal(context: context, signal: signal);
+                          return;
+                        }
 
-                      if (!context.mounted) return;
-
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(result),
-                          behavior: SnackBarBehavior.floating,
-                        ),
-                      );
-                    }
-                  : null,
-            );
-          },
+                        _showSignalBackDialog(
+                          context: context,
+                          currentUser: currentUser,
+                          signal: signal,
+                        );
+                      },
+                    );
+                  },
+                ),
         );
       },
     );
   }
 
-  Widget _buildSentSignalsTab(BuildContext context) {
-    return ValueListenableBuilder<List<VibeSignal>>(
-      valueListenable: SignalService.sentSignalsNotifier,
-      builder: (context, signals, child) {
-        if (signals.isEmpty) {
-          return ListView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            children: [
-              const SizedBox(height: 80),
-              _buildEmptyState(
-                icon: Icons.send_rounded,
-                title: 'Chưa gửi signal nào',
-                subtitle:
-                    'Hãy vào Daily Match để gửi tín hiệu nhẹ cho người bạn thấy hợp vibe.',
-              ),
-            ],
+  Widget _buildSentSignalsTab(UserProfile currentUser) {
+    return StreamBuilder<List<VibeSignal>>(
+      stream: SignalService.sentSignalsStream(currentUser.id),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(
+            child: CircularProgressIndicator(color: Color(0xFF7B61FF)),
           );
         }
 
-        return ListView.builder(
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(18, 16, 18, 24),
-          itemCount: signals.length,
-          itemBuilder: (context, index) {
-            final signal = signals[index];
+        if (snapshot.hasError) {
+          return _buildErrorState(snapshot.error.toString());
+        }
 
-            return _buildSignalCard(
-              context: context,
-              signal: signal,
-              titleName: signal.receiverName,
-              isReceived: false,
-              onPrimaryAction: signal.status == 'mutual'
-                  ? () {
-                      _openChatFromSignal(
-                        context: context,
-                        otherUserId: signal.receiverId,
-                      );
-                    }
-                  : null,
-              onDeclineAction: null,
-            );
-          },
+        final signals = snapshot.data ?? [];
+
+        return RefreshIndicator(
+          onRefresh: refreshSignals,
+          child: signals.isEmpty
+              ? ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  children: [
+                    const SizedBox(height: 80),
+                    _buildEmptyState(
+                      icon: Icons.send_rounded,
+                      title: 'Chưa gửi signal nào',
+                      subtitle:
+                          'Hãy vào Daily Match để gửi tín hiệu nhẹ cho người bạn thấy hợp vibe.',
+                    ),
+                  ],
+                )
+              : ListView.builder(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.fromLTRB(18, 16, 18, 24),
+                  itemCount: signals.length,
+                  itemBuilder: (context, index) {
+                    final signal = signals[index];
+
+                    return _buildSignalCard(
+                      context: context,
+                      signal: signal,
+                      titleName: signal.receiverName,
+                      isReceived: false,
+                      onPrimaryAction: signal.status == 'mutual'
+                          ? () {
+                              _openChatFromSignal(
+                                context: context,
+                                signal: signal,
+                              );
+                            }
+                          : null,
+                    );
+                  },
+                ),
         );
       },
-    );
-  }
-
-  Widget _buildEmptyState({
-    required IconData icon,
-    required String title,
-    required String subtitle,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.all(28),
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(24),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(26),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.purple.withOpacity(0.08),
-              blurRadius: 18,
-              offset: const Offset(0, 8),
-            ),
-          ],
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 76,
-              height: 76,
-              decoration: BoxDecoration(
-                color: const Color(0xFFFFF3E0),
-                borderRadius: BorderRadius.circular(24),
-              ),
-              child: Icon(icon, color: const Color(0xFFFF9800), size: 40),
-            ),
-            const SizedBox(height: 18),
-            Text(
-              title,
-              style: const TextStyle(fontSize: 21, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              subtitle,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: Colors.black54,
-                fontSize: 14,
-                height: 1.45,
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 
@@ -392,7 +326,6 @@ class _SignalsScreenState extends State<SignalsScreen> {
     required String titleName,
     required bool isReceived,
     required VoidCallback? onPrimaryAction,
-    required VoidCallback? onDeclineAction,
   }) {
     final Color statusColor = _getStatusColor(signal.status);
     final bool isMutual = signal.status == 'mutual';
@@ -460,7 +393,9 @@ class _SignalsScreenState extends State<SignalsScreen> {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  signal.message,
+                  signal.message.isEmpty
+                      ? 'Đã gửi một vibe signal.'
+                      : signal.message,
                   style: const TextStyle(
                     color: Colors.black87,
                     fontSize: 14,
@@ -479,45 +414,22 @@ class _SignalsScreenState extends State<SignalsScreen> {
                 ),
                 const SizedBox(height: 14),
                 if (isReceived && isPending)
-                  Row(
-                    children: [
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          onPressed: onPrimaryAction,
-                          icon: const Icon(Icons.bolt_rounded, size: 18),
-                          label: const Text('Signal lại'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFFFF9800),
-                            foregroundColor: Colors.white,
-                            elevation: 0,
-                            padding: const EdgeInsets.symmetric(vertical: 13),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(15),
-                            ),
-                          ),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: onPrimaryAction,
+                      icon: const Icon(Icons.bolt_rounded, size: 18),
+                      label: const Text('Signal lại'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFFF9800),
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(15),
                         ),
                       ),
-                      const SizedBox(width: 10),
-                      InkWell(
-                        borderRadius: BorderRadius.circular(15),
-                        onTap: onDeclineAction,
-                        child: Container(
-                          width: 48,
-                          height: 48,
-                          decoration: BoxDecoration(
-                            color: Colors.red.withOpacity(0.08),
-                            borderRadius: BorderRadius.circular(15),
-                            border: Border.all(
-                              color: Colors.red.withOpacity(0.18),
-                            ),
-                          ),
-                          child: const Icon(
-                            Icons.close_rounded,
-                            color: Colors.red,
-                          ),
-                        ),
-                      ),
-                    ],
+                    ),
                   )
                 else if (isMutual)
                   SizedBox(
@@ -601,6 +513,60 @@ class _SignalsScreenState extends State<SignalsScreen> {
     );
   }
 
+  Widget _buildEmptyState({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.all(28),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(26),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.purple.withOpacity(0.08),
+              blurRadius: 18,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 76,
+              height: 76,
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFF3E0),
+                borderRadius: BorderRadius.circular(24),
+              ),
+              child: Icon(icon, color: const Color(0xFFFF9800), size: 40),
+            ),
+            const SizedBox(height: 18),
+            Text(
+              title,
+              style: const TextStyle(fontSize: 21, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              subtitle,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Colors.black54,
+                fontSize: 14,
+                height: 1.45,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildStatusChip(String status) {
     final String text = _getStatusText(status);
     final Color color = _getStatusColor(status);
@@ -667,7 +633,7 @@ class _SignalsScreenState extends State<SignalsScreen> {
         bool isSending = false;
 
         return StatefulBuilder(
-          builder: (context, setDialogState) {
+          builder: (innerContext, setDialogState) {
             return AlertDialog(
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(24),
@@ -741,34 +707,42 @@ class _SignalsScreenState extends State<SignalsScreen> {
                             isSending = true;
                           });
 
-                          final result = await SignalService.signalBack(
-                            currentUser: currentUser,
-                            senderId: signal.senderId,
-                            message: messageController.text.trim().isEmpty
-                                ? 'Mình cũng thấy bạn hợp vibe, kết nối nhé!'
-                                : messageController.text.trim(),
-                          );
-
-                          await SignalService.loadCurrentUserSignals();
-
-                          if (!context.mounted) return;
-
-                          Navigator.pop(dialogContext);
-
-                          final chatRoom = ChatService.getChatRoomWith(
-                            signal.senderId,
-                          );
-
-                          if (chatRoom != null) {
-                            _showMutualSuccessDialog(
-                              context: context,
-                              userName: signal.senderName,
-                              chatRoom: chatRoom,
+                          try {
+                            final senderProfile = await _getUserProfileById(
+                              signal.senderId,
+                              fallbackName: signal.senderName,
                             );
-                          } else {
+
+                            final result = await SignalService.signalBack(
+                              currentUser: currentUser,
+                              sender: senderProfile,
+                              message: messageController.text.trim().isEmpty
+                                  ? 'Mình cũng thấy bạn hợp vibe, kết nối nhé!'
+                                  : messageController.text.trim(),
+                            );
+
+                            if (!mounted) return;
+
+                            Navigator.pop(dialogContext);
+
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
                                 content: Text(result),
+                                behavior: SnackBarBehavior.floating,
+                              ),
+                            );
+
+                            setState(() {});
+                          } catch (e) {
+                            if (!mounted) return;
+
+                            setDialogState(() {
+                              isSending = false;
+                            });
+
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Signal lại thất bại: $e'),
                                 behavior: SnackBarBehavior.floating,
                               ),
                             );
@@ -798,98 +772,45 @@ class _SignalsScreenState extends State<SignalsScreen> {
     );
   }
 
-  void _showMutualSuccessDialog({
-    required BuildContext context,
-    required String userName,
-    required ChatRoom chatRoom,
-  }) {
-    showDialog(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(24),
-          ),
-          title: Row(
-            children: [
-              Container(
-                width: 46,
-                height: 46,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF4CAF50).withOpacity(0.14),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: const Icon(
-                  Icons.celebration_rounded,
-                  color: Color(0xFF4CAF50),
-                ),
-              ),
-              const SizedBox(width: 12),
-              const Expanded(
-                child: Text(
-                  'Mutual Signal!',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-              ),
-            ],
-          ),
-          content: Text(
-            'Bạn và $userName đã cùng gửi signal cho nhau. Phòng chat đã được mở.',
-            style: const TextStyle(color: Colors.black54, height: 1.4),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.pop(dialogContext);
-              },
-              child: const Text('Để sau'),
-            ),
-            ElevatedButton.icon(
-              onPressed: () {
-                Navigator.pop(dialogContext);
+  Future<UserProfile> _getUserProfileById(
+    String userId, {
+    required String fallbackName,
+  }) async {
+    final users = await UserProfileService.getAllUsers();
 
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) =>
-                        ChatDetailScreen(chatRoomId: chatRoom.id),
-                  ),
-                );
-              },
-              icon: const Icon(Icons.chat_bubble_rounded, size: 18),
-              label: const Text('Mở chat ngay'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF4CAF50),
-                foregroundColor: Colors.white,
-              ),
-            ),
-          ],
-        );
-      },
+    for (final user in users) {
+      if (user.id == userId) {
+        return user;
+      }
+    }
+
+    return UserProfile(
+      id: userId,
+      nickname: fallbackName.isEmpty ? 'Người dùng UniVibe' : fallbackName,
+      avatarUrl: '',
+      university: '',
+      major: '',
+      year: 1,
+      gender: '',
+      interests: const [],
+      goals: const [],
+      vibeTags: const [],
+      bio: '',
     );
   }
 
   void _openChatFromSignal({
     required BuildContext context,
-    required String otherUserId,
+    required VibeSignal signal,
   }) {
-    final chatRoom = ChatService.getChatRoomWith(otherUserId);
-
-    if (chatRoom == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Chưa tìm thấy phòng chat. Hãy thử lại sau.'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-
-      return;
-    }
+    final chatRoomId =
+        signal.chatRoomId ??
+        SignalService.chatRoomIdFor(signal.senderId, signal.receiverId);
 
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => ChatDetailScreen(chatRoomId: chatRoom.id),
+        builder: (context) => ChatDetailScreen(chatRoomId: chatRoomId),
       ),
     );
   }

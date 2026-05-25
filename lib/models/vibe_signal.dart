@@ -10,6 +10,8 @@ class VibeSignal {
   final String message;
   final String status;
   final DateTime createdAt;
+  final DateTime? updatedAt;
+  final String? chatRoomId;
 
   VibeSignal({
     required this.id,
@@ -21,35 +23,9 @@ class VibeSignal {
     required this.message,
     required this.status,
     required this.createdAt,
+    this.updatedAt,
+    this.chatRoomId,
   });
-
-  factory VibeSignal.fromMap(Map<String, dynamic> map) {
-    return VibeSignal(
-      id: map['id']?.toString() ?? '',
-      senderId: map['senderId']?.toString() ?? '',
-      senderName: map['senderName']?.toString() ?? '',
-      receiverId: map['receiverId']?.toString() ?? '',
-      receiverName: map['receiverName']?.toString() ?? '',
-      type: map['type']?.toString() ?? 'vibe',
-      message: map['message']?.toString() ?? '',
-      status: map['status']?.toString() ?? 'pending',
-      createdAt: _parseDateTime(map['createdAt']),
-    );
-  }
-
-  Map<String, dynamic> toMap() {
-    return {
-      'id': id,
-      'senderId': senderId,
-      'senderName': senderName,
-      'receiverId': receiverId,
-      'receiverName': receiverName,
-      'type': type,
-      'message': message,
-      'status': status,
-      'createdAt': Timestamp.fromDate(createdAt),
-    };
-  }
 
   VibeSignal copyWith({
     String? id,
@@ -61,6 +37,8 @@ class VibeSignal {
     String? message,
     String? status,
     DateTime? createdAt,
+    DateTime? updatedAt,
+    String? chatRoomId,
   }) {
     return VibeSignal(
       id: id ?? this.id,
@@ -72,22 +50,47 @@ class VibeSignal {
       message: message ?? this.message,
       status: status ?? this.status,
       createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      chatRoomId: chatRoomId ?? this.chatRoomId,
     );
   }
 
-  static DateTime _parseDateTime(dynamic value) {
-    if (value is Timestamp) {
-      return value.toDate();
+  Map<String, dynamic> toFirestore() {
+    return {
+      'senderId': senderId,
+      'senderName': senderName,
+      'receiverId': receiverId,
+      'receiverName': receiverName,
+      'type': type,
+      'message': message,
+      'status': status,
+      'createdAt': Timestamp.fromDate(createdAt),
+      'updatedAt': updatedAt == null ? null : Timestamp.fromDate(updatedAt!),
+      'chatRoomId': chatRoomId,
+    };
+  }
+
+  factory VibeSignal.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) {
+    final data = doc.data() ?? {};
+
+    DateTime readDate(dynamic value) {
+      if (value is Timestamp) return value.toDate();
+      if (value is DateTime) return value;
+      return DateTime.now();
     }
 
-    if (value is DateTime) {
-      return value;
-    }
-
-    if (value is String) {
-      return DateTime.tryParse(value) ?? DateTime.now();
-    }
-
-    return DateTime.now();
+    return VibeSignal(
+      id: doc.id,
+      senderId: (data['senderId'] ?? '').toString(),
+      senderName: (data['senderName'] ?? '').toString(),
+      receiverId: (data['receiverId'] ?? '').toString(),
+      receiverName: (data['receiverName'] ?? '').toString(),
+      type: (data['type'] ?? 'vibe').toString(),
+      message: (data['message'] ?? '').toString(),
+      status: (data['status'] ?? 'pending').toString(),
+      createdAt: readDate(data['createdAt']),
+      updatedAt: data['updatedAt'] == null ? null : readDate(data['updatedAt']),
+      chatRoomId: data['chatRoomId']?.toString(),
+    );
   }
 }

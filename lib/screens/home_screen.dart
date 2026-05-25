@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 
 import '../models/chat_room.dart';
+import '../models/user_profile.dart';
 import '../models/vibe_signal.dart';
+import '../services/auth_service.dart';
 import '../services/chat_service.dart';
 import '../services/signal_service.dart';
-import '../services/auth_service.dart';
+import '../services/user_profile_service.dart';
 import 'auth_gate.dart';
 import 'chats_screen.dart';
 import 'daily_match_screen.dart';
@@ -19,10 +21,12 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  late Future<UserProfile?> currentUserFuture;
+
   @override
   void initState() {
     super.initState();
-    SignalService.loadCurrentUserSignals();
+    currentUserFuture = UserProfileService.getCurrentUserProfile();
   }
 
   void _goToScreen(BuildContext context, Widget screen) {
@@ -77,48 +81,150 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<List<VibeSignal>>(
-      valueListenable: SignalService.receivedSignalsNotifier,
-      builder: (context, receivedSignals, child) {
-        return ValueListenableBuilder<List<ChatRoom>>(
-          valueListenable: ChatService.chatRoomsNotifier,
-          builder: (context, chatRooms, child) {
+    return FutureBuilder<UserProfile?>(
+      future: currentUserFuture,
+      builder: (context, userSnapshot) {
+        if (userSnapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            backgroundColor: Color(0xFFF7F3FF),
+            body: Center(
+              child: CircularProgressIndicator(color: Color(0xFF7B61FF)),
+            ),
+          );
+        }
+
+        if (userSnapshot.hasError) {
+          return _buildErrorScaffold(userSnapshot.error.toString());
+        }
+
+        final currentUser = userSnapshot.data;
+
+        if (currentUser == null) {
+          return _buildErrorScaffold('Không tìm thấy profile hiện tại');
+        }
+
+        return StreamBuilder<List<VibeSignal>>(
+          stream: SignalService.receivedSignalsStream(currentUser.id),
+          builder: (context, signalSnapshot) {
+            final receivedSignals = signalSnapshot.data ?? [];
             final pendingSignalCount = _getPendingReceivedSignalCount(
               receivedSignals,
             );
-            final chatCount = chatRooms.length;
-            final totalNotificationCount = pendingSignalCount + chatCount;
 
-            return Scaffold(
-              backgroundColor: const Color(0xFFF7F3FF),
-              body: SafeArea(
-                child: SingleChildScrollView(
-                  child: Column(
-                    children: [
-                      _buildHeader(
-                        context: context,
-                        totalNotificationCount: totalNotificationCount,
+            return ValueListenableBuilder<List<ChatRoom>>(
+              valueListenable: ChatService.chatRoomsNotifier,
+              builder: (context, chatRooms, child) {
+                final chatCount = chatRooms.length;
+                final totalNotificationCount = pendingSignalCount + chatCount;
+
+                return Scaffold(
+                  backgroundColor: const Color(0xFFF7F3FF),
+                  body: SafeArea(
+                    child: SingleChildScrollView(
+                      child: Column(
+                        children: [
+                          _buildHeader(
+                            context: context,
+                            totalNotificationCount: totalNotificationCount,
+                          ),
+                          const SizedBox(height: 18),
+                          _buildTodayCard(
+                            pendingSignalCount: pendingSignalCount,
+                            chatCount: chatCount,
+                          ),
+                          const SizedBox(height: 18),
+                          _buildFeatureSection(
+                            context: context,
+                            pendingSignalCount: pendingSignalCount,
+                            chatCount: chatCount,
+                          ),
+                          const SizedBox(height: 24),
+                        ],
                       ),
-                      const SizedBox(height: 18),
-                      _buildTodayCard(
-                        pendingSignalCount: pendingSignalCount,
-                        chatCount: chatCount,
-                      ),
-                      const SizedBox(height: 18),
-                      _buildFeatureSection(
-                        context: context,
-                        pendingSignalCount: pendingSignalCount,
-                        chatCount: chatCount,
-                      ),
-                      const SizedBox(height: 24),
-                    ],
+                    ),
                   ),
-                ),
-              ),
+                );
+              },
             );
           },
         );
       },
+    );
+  }
+
+  Widget _buildErrorScaffold(String error) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF7F3FF),
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(28),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(26),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.purple.withOpacity(0.08),
+                    blurRadius: 18,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 76,
+                    height: 76,
+                    decoration: BoxDecoration(
+                      color: Colors.red.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(24),
+                    ),
+                    child: const Icon(
+                      Icons.error_outline_rounded,
+                      size: 42,
+                      color: Colors.red,
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  const Text(
+                    'Không tải được trang chủ',
+                    style: TextStyle(fontSize: 21, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    error,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Colors.black54,
+                      fontSize: 14,
+                      height: 1.4,
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  ElevatedButton.icon(
+                    onPressed: () {
+                      setState(() {
+                        currentUserFuture =
+                            UserProfileService.getCurrentUserProfile();
+                      });
+                    },
+                    icon: const Icon(Icons.refresh_rounded),
+                    label: const Text('Thử lại'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF7B61FF),
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -232,8 +338,6 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
         ),
-
-        // Nút thông báo
         InkWell(
           borderRadius: BorderRadius.circular(14),
           onTap: () {
@@ -286,10 +390,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
         ),
-
         const SizedBox(width: 10),
-
-        // Nút đăng xuất
         InkWell(
           borderRadius: BorderRadius.circular(14),
           onTap: () {

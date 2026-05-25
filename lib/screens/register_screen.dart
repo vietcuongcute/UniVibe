@@ -141,7 +141,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
               width: 42,
               height: 42,
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.18),
+                color: Colors.white.withValues(alpha: 0.18),
                 shape: BoxShape.circle,
               ),
               child: const Icon(
@@ -158,9 +158,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 width: 62,
                 height: 62,
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.18),
+                  color: Colors.white.withValues(alpha: 0.18),
                   borderRadius: BorderRadius.circular(22),
-                  border: Border.all(color: Colors.white.withOpacity(0.25)),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.25),
+                  ),
                 ),
                 child: const Icon(
                   Icons.person_add_alt_1_rounded,
@@ -212,7 +214,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
           borderRadius: BorderRadius.circular(28),
           boxShadow: [
             BoxShadow(
-              color: Colors.purple.withOpacity(0.08),
+              color: Colors.purple.withValues(alpha: 0.08),
               blurRadius: 20,
               offset: const Offset(0, 10),
             ),

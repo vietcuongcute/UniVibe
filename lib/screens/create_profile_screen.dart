@@ -254,7 +254,7 @@ class _CreateProfileScreenState extends State<CreateProfileScreen> {
         borderRadius: BorderRadius.circular(26),
         boxShadow: [
           BoxShadow(
-            color: Colors.purple.withOpacity(0.08),
+            color: Colors.purple.withValues(alpha: 0.08),
             blurRadius: 20,
             offset: const Offset(0, 10),
           ),
@@ -305,7 +305,7 @@ class _CreateProfileScreenState extends State<CreateProfileScreen> {
 
   Widget _buildYearDropdown() {
     return DropdownButtonFormField<int>(
-      value: selectedYear,
+      initialValue: selectedYear,
       decoration: _inputDecoration(
         label: 'Năm học',
         icon: Icons.calendar_month_rounded,
@@ -328,7 +328,7 @@ class _CreateProfileScreenState extends State<CreateProfileScreen> {
 
   Widget _buildGenderDropdown() {
     return DropdownButtonFormField<String>(
-      value: selectedGender,
+      initialValue: selectedGender,
       decoration: _inputDecoration(
         label: 'Giới tính',
         icon: Icons.person_rounded,
@@ -359,7 +359,7 @@ class _CreateProfileScreenState extends State<CreateProfileScreen> {
         borderRadius: BorderRadius.circular(26),
         boxShadow: [
           BoxShadow(
-            color: Colors.purple.withOpacity(0.07),
+            color: Colors.purple.withValues(alpha: 0.07),
             blurRadius: 18,
             offset: const Offset(0, 9),
           ),

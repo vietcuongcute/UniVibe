@@ -1,128 +1,90 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/material.dart';
 
 import '../models/user_profile.dart';
 import '../models/vibe_signal.dart';
-import 'chat_service.dart';
-import 'user_profile_service.dart';
 
 class SignalService {
   static final FirebaseFirestore _db = FirebaseFirestore.instance;
-  static final FirebaseAuth _auth = FirebaseAuth.instance;
-
-  static final ValueNotifier<List<VibeSignal>> sentSignalsNotifier =
-      ValueNotifier<List<VibeSignal>>([]);
-
-  static final ValueNotifier<List<VibeSignal>> receivedSignalsNotifier =
-      ValueNotifier<List<VibeSignal>>([]);
 
   static const int dailySignalLimit = 5;
 
-  static CollectionReference<Map<String, dynamic>> get _signals {
+  static CollectionReference<Map<String, dynamic>> get _signalsRef {
     return _db.collection('signals');
   }
 
-  static List<VibeSignal> get sentSignals {
-    return sentSignalsNotifier.value;
+  static CollectionReference<Map<String, dynamic>> get _chatRoomsRef {
+    return _db.collection('chatRooms');
   }
 
-  static List<VibeSignal> get receivedSignals {
-    return receivedSignalsNotifier.value;
+  static String _pairId(String uid1, String uid2) {
+    final ids = [uid1, uid2]..sort();
+    return '${ids[0]}_${ids[1]}';
   }
 
-  static String? get _currentUserId {
-    return _auth.currentUser?.uid;
+  static String _signalDocId({
+    required String senderId,
+    required String receiverId,
+  }) {
+    return '${senderId}_to_$receiverId';
   }
 
-  static Future<void> loadCurrentUserSignals() async {
-    final userId = _currentUserId;
-
-    if (userId == null) return;
-
-    final sentSnapshot = await _signals
-        .where('senderId', isEqualTo: userId)
-        .get();
-
-    final receivedSnapshot = await _signals
-        .where('receiverId', isEqualTo: userId)
-        .get();
-
-    final sentList = sentSnapshot.docs.map((doc) {
-      final data = doc.data();
-
-      return VibeSignal.fromMap({...data, 'id': data['id'] ?? doc.id});
-    }).toList();
-
-    final receivedList = receivedSnapshot.docs.map((doc) {
-      final data = doc.data();
-
-      return VibeSignal.fromMap({...data, 'id': data['id'] ?? doc.id});
-    }).toList();
-
-    sentList.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-    receivedList.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-
-    sentSignalsNotifier.value = sentList;
-    receivedSignalsNotifier.value = receivedList;
+  static String chatRoomIdFor(String uid1, String uid2) {
+    return 'chat_${_pairId(uid1, uid2)}';
   }
 
-  static Future<void> listenCurrentUserSignals() async {
-    final userId = _currentUserId;
+  static Stream<List<VibeSignal>> receivedSignalsStream(String currentUserId) {
+    return _signalsRef
+        .where('receiverId', isEqualTo: currentUserId)
+        .snapshots()
+        .map((snapshot) {
+          final signals = snapshot.docs
+              .map((doc) => VibeSignal.fromFirestore(doc))
+              .toList();
 
-    if (userId == null) return;
-
-    _signals.where('senderId', isEqualTo: userId).snapshots().listen((
-      snapshot,
-    ) {
-      final sentList = snapshot.docs.map((doc) {
-        final data = doc.data();
-
-        return VibeSignal.fromMap({...data, 'id': data['id'] ?? doc.id});
-      }).toList();
-
-      sentList.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-
-      sentSignalsNotifier.value = sentList;
-    });
-
-    _signals.where('receiverId', isEqualTo: userId).snapshots().listen((
-      snapshot,
-    ) {
-      final receivedList = snapshot.docs.map((doc) {
-        final data = doc.data();
-
-        return VibeSignal.fromMap({...data, 'id': data['id'] ?? doc.id});
-      }).toList();
-
-      receivedList.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-
-      receivedSignalsNotifier.value = receivedList;
-    });
+          signals.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+          return signals;
+        });
   }
 
-  static bool hasSentSignalTo(String receiverId) {
-    return sentSignals.any((signal) => signal.receiverId == receiverId);
+  static Stream<List<VibeSignal>> sentSignalsStream(String currentUserId) {
+    return _signalsRef
+        .where('senderId', isEqualTo: currentUserId)
+        .snapshots()
+        .map((snapshot) {
+          final signals = snapshot.docs
+              .map((doc) => VibeSignal.fromFirestore(doc))
+              .toList();
+
+          signals.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+          return signals;
+        });
   }
 
-  static bool hasReceivedSignalFrom(String senderId) {
-    return receivedSignals.any((signal) => signal.senderId == senderId);
+  static Future<bool> hasSentSignalTo({
+    required String currentUserId,
+    required String receiverId,
+  }) async {
+    final docId = _signalDocId(senderId: currentUserId, receiverId: receiverId);
+
+    final doc = await _signalsRef.doc(docId).get();
+    return doc.exists;
   }
 
-  static bool canSendSignal() {
-    return _getTodaySentSignalCount() < dailySignalLimit;
-  }
-
-  static int _getTodaySentSignalCount() {
+  static Future<bool> canSendSignal(String currentUserId) async {
     final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
 
-    return sentSignals.where((signal) {
-      final createdAt = signal.createdAt;
+    final snapshot = await _signalsRef
+        .where('senderId', isEqualTo: currentUserId)
+        .get();
 
-      return createdAt.year == now.year &&
-          createdAt.month == now.month &&
-          createdAt.day == now.day;
+    final todaySignals = snapshot.docs.where((doc) {
+      final signal = VibeSignal.fromFirestore(doc);
+      return signal.createdAt.isAfter(today) ||
+          signal.createdAt.isAtSameMomentAs(today);
     }).length;
+
+    return todaySignals < dailySignalLimit;
   }
 
   static Future<String> sendSignal({
@@ -131,55 +93,118 @@ class SignalService {
     String type = 'vibe',
     String message = 'Bạn có vẻ cùng vibe với mình!',
   }) async {
-    await loadCurrentUserSignals();
+    if (currentUser.id == receiver.id) {
+      return 'Bạn không thể tự gửi signal cho chính mình.';
+    }
 
-    final alreadySent = await _hasSentSignalToInFirestore(
+    final newSignalDocId = _signalDocId(
       senderId: currentUser.id,
       receiverId: receiver.id,
     );
 
-    if (alreadySent) {
+    final newSignalRef = _signalsRef.doc(newSignalDocId);
+    final existingSignal = await newSignalRef.get();
+
+    if (existingSignal.exists) {
       return 'Bạn đã gửi signal cho ${receiver.nickname} rồi.';
     }
 
-    if (!canSendSignal()) {
+    final allowed = await canSendSignal(currentUser.id);
+    if (!allowed) {
       return 'Hôm nay bạn đã dùng hết $dailySignalLimit signal.';
     }
 
+    final oppositeSignalDocId = _signalDocId(
+      senderId: receiver.id,
+      receiverId: currentUser.id,
+    );
+
+    final oppositeSignalRef = _signalsRef.doc(oppositeSignalDocId);
+    final oppositeSignal = await oppositeSignalRef.get();
+
     final now = DateTime.now();
-    final docRef = _signals.doc();
+    final pairId = _pairId(currentUser.id, receiver.id);
+    final chatRoomId = chatRoomIdFor(currentUser.id, receiver.id);
+    final bool isMutual = oppositeSignal.exists;
 
     final newSignal = VibeSignal(
-      id: docRef.id,
+      id: newSignalDocId,
       senderId: currentUser.id,
       senderName: currentUser.nickname,
       receiverId: receiver.id,
       receiverName: receiver.nickname,
       type: type,
-      message: message,
-      status: 'pending',
+      message: message.trim().isEmpty
+          ? 'Bạn có vẻ cùng vibe với mình!'
+          : message.trim(),
+      status: isMutual ? 'mutual' : 'pending',
       createdAt: now,
+      updatedAt: now,
+      chatRoomId: isMutual ? chatRoomId : null,
     );
 
-    await docRef.set(newSignal.toMap());
+    final batch = _db.batch();
 
-    await loadCurrentUserSignals();
-
-    final isMutual = await _hasPendingSignalInOppositeDirection(
-      currentUserId: currentUser.id,
-      otherUserId: receiver.id,
-    );
+    batch.set(newSignalRef, {
+      ...newSignal.toFirestore(),
+      'pairId': pairId,
+      'userIds': [currentUser.id, receiver.id],
+    });
 
     if (isMutual) {
-      await _markMutualWith(
-        currentUserId: currentUser.id,
-        otherUserId: receiver.id,
-      );
+      batch.update(oppositeSignalRef, {
+        'status': 'mutual',
+        'updatedAt': Timestamp.fromDate(now),
+        'chatRoomId': chatRoomId,
+      });
 
-      ChatService.createChatRoom(currentUser: currentUser, otherUser: receiver);
+      final chatRoomRef = _chatRoomsRef.doc(chatRoomId);
 
-      await loadCurrentUserSignals();
+      batch.set(chatRoomRef, {
+        'id': chatRoomId,
+        'userIds': [currentUser.id, receiver.id],
+        'pairId': pairId,
+        'createdAt': Timestamp.fromDate(now),
+        'updatedAt': Timestamp.fromDate(now),
+        'lastMessage': 'Hai bạn đã mutual signal 🎉',
+        'lastMessageSenderId': 'system',
+        'members': {
+          currentUser.id: {
+            'id': currentUser.id,
+            'nickname': currentUser.nickname,
+            'avatarUrl': currentUser.avatarUrl,
+            'university': currentUser.university,
+            'major': currentUser.major,
+            'year': currentUser.year,
+          },
+          receiver.id: {
+            'id': receiver.id,
+            'nickname': receiver.nickname,
+            'avatarUrl': receiver.avatarUrl,
+            'university': receiver.university,
+            'major': receiver.major,
+            'year': receiver.year,
+          },
+        },
+      }, SetOptions(merge: true));
 
+      final welcomeMessageRef = chatRoomRef
+          .collection('messages')
+          .doc('welcome');
+
+      batch.set(welcomeMessageRef, {
+        'id': welcomeMessageRef.id,
+        'chatRoomId': chatRoomId,
+        'senderId': 'system',
+        'text':
+            'Hai bạn đã mutual signal 🎉 Bây giờ có thể trò chuyện với nhau rồi!',
+        'createdAt': Timestamp.fromDate(now),
+      }, SetOptions(merge: true));
+    }
+
+    await batch.commit();
+
+    if (isMutual) {
       return 'Mutual signal với ${receiver.nickname}! Phòng chat đã được mở.';
     }
 
@@ -188,111 +213,13 @@ class SignalService {
 
   static Future<String> signalBack({
     required UserProfile currentUser,
-    required String senderId,
+    required UserProfile sender,
     String message = 'Mình cũng thấy bạn hợp vibe, kết nối nhé!',
   }) async {
-    final sender = await _findUserById(senderId);
-
-    if (sender == null) {
-      return 'Không tìm thấy người dùng này.';
-    }
-
     return sendSignal(
       currentUser: currentUser,
       receiver: sender,
       message: message,
     );
-  }
-
-  static Future<String> declineSignal(String signalId) async {
-    await _signals.doc(signalId).update({
-      'status': 'declined',
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
-
-    await loadCurrentUserSignals();
-
-    return 'Đã từ chối signal.';
-  }
-
-  static Future<bool> _hasSentSignalToInFirestore({
-    required String senderId,
-    required String receiverId,
-  }) async {
-    final snapshot = await _signals
-        .where('senderId', isEqualTo: senderId)
-        .where('receiverId', isEqualTo: receiverId)
-        .limit(1)
-        .get();
-
-    return snapshot.docs.isNotEmpty;
-  }
-
-  static Future<bool> _hasPendingSignalInOppositeDirection({
-    required String currentUserId,
-    required String otherUserId,
-  }) async {
-    final snapshot = await _signals
-        .where('senderId', isEqualTo: otherUserId)
-        .where('receiverId', isEqualTo: currentUserId)
-        .where('status', isEqualTo: 'pending')
-        .limit(1)
-        .get();
-
-    return snapshot.docs.isNotEmpty;
-  }
-
-  static Future<void> _markMutualWith({
-    required String currentUserId,
-    required String otherUserId,
-  }) async {
-    final sentSnapshot = await _signals
-        .where('senderId', isEqualTo: currentUserId)
-        .where('receiverId', isEqualTo: otherUserId)
-        .get();
-
-    final receivedSnapshot = await _signals
-        .where('senderId', isEqualTo: otherUserId)
-        .where('receiverId', isEqualTo: currentUserId)
-        .get();
-
-    final batch = _db.batch();
-
-    for (final doc in sentSnapshot.docs) {
-      batch.update(doc.reference, {
-        'status': 'mutual',
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-    }
-
-    for (final doc in receivedSnapshot.docs) {
-      batch.update(doc.reference, {
-        'status': 'mutual',
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-    }
-
-    await batch.commit();
-  }
-
-  static Future<UserProfile?> _findUserById(String userId) async {
-    final currentUser = await UserProfileService.getCurrentUserProfile();
-
-    if (currentUser != null && currentUser.id == userId) {
-      return currentUser;
-    }
-
-    final users = await UserProfileService.getAllUsers();
-
-    try {
-      return users.firstWhere((user) => user.id == userId);
-    } catch (_) {
-      return null;
-    }
-  }
-
-  static Future<void> clearSignals() async {
-    sentSignalsNotifier.value = [];
-    receivedSignalsNotifier.value = [];
   }
 }

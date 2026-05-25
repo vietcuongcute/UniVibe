@@ -107,7 +107,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               width: 40,
               height: 40,
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.18),
+                color: Colors.white.withValues(alpha: 0.18),
                 shape: BoxShape.circle,
               ),
               child: const Icon(
@@ -163,7 +163,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               width: 40,
               height: 40,
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.18),
+                color: Colors.white.withValues(alpha: 0.18),
                 shape: BoxShape.circle,
               ),
               child: const Icon(
@@ -190,7 +190,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(100),
-            border: Border.all(color: Colors.purple.withOpacity(0.12)),
+            border: Border.all(color: Colors.purple.withValues(alpha: 0.12)),
           ),
           child: Text(
             message.text,
@@ -221,7 +221,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.purple.withOpacity(0.06),
+              color: Colors.purple.withValues(alpha: 0.06),
               blurRadius: 12,
               offset: const Offset(0, 6),
             ),
@@ -261,7 +261,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         color: Colors.white,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
+            color: Colors.black.withValues(alpha: 0.06),
             blurRadius: 18,
             offset: const Offset(0, -5),
           ),
@@ -415,9 +415,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: color.withOpacity(0.08),
+          color: color.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: color.withOpacity(0.16)),
+          border: Border.all(color: color.withValues(alpha: 0.16)),
         ),
         child: Row(
           children: [
@@ -425,7 +425,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               width: 44,
               height: 44,
               decoration: BoxDecoration(
-                color: color.withOpacity(0.14),
+                color: color.withValues(alpha: 0.14),
                 borderRadius: BorderRadius.circular(15),
               ),
               child: Icon(icon, color: color),
@@ -501,7 +501,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                     ),
                     const SizedBox(height: 16),
                     DropdownButtonFormField<String>(
-                      value: selectedReason,
+                      initialValue: selectedReason,
                       decoration: InputDecoration(
                         labelText: 'Lý do',
                         border: OutlineInputBorder(
