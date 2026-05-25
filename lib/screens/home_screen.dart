@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../models/chat_room.dart';
 import '../models/user_profile.dart';
 import '../models/vibe_signal.dart';
 import '../services/auth_service.dart';
@@ -79,6 +78,14 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Future<void> _refreshHome() async {
+    setState(() {
+      currentUserFuture = UserProfileService.getCurrentUserProfile();
+    });
+
+    await currentUserFuture;
+  }
+
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<UserProfile?>(
@@ -111,35 +118,40 @@ class _HomeScreenState extends State<HomeScreen> {
               receivedSignals,
             );
 
-            return ValueListenableBuilder<List<ChatRoom>>(
-              valueListenable: ChatService.chatRoomsNotifier,
-              builder: (context, chatRooms, child) {
+            return StreamBuilder<List<FirestoreChatRoom>>(
+              stream: ChatService.chatRoomsStream(currentUser.id),
+              builder: (context, chatSnapshot) {
+                final chatRooms = chatSnapshot.data ?? [];
                 final chatCount = chatRooms.length;
                 final totalNotificationCount = pendingSignalCount + chatCount;
 
                 return Scaffold(
                   backgroundColor: const Color(0xFFF7F3FF),
                   body: SafeArea(
-                    child: SingleChildScrollView(
-                      child: Column(
-                        children: [
-                          _buildHeader(
-                            context: context,
-                            totalNotificationCount: totalNotificationCount,
-                          ),
-                          const SizedBox(height: 18),
-                          _buildTodayCard(
-                            pendingSignalCount: pendingSignalCount,
-                            chatCount: chatCount,
-                          ),
-                          const SizedBox(height: 18),
-                          _buildFeatureSection(
-                            context: context,
-                            pendingSignalCount: pendingSignalCount,
-                            chatCount: chatCount,
-                          ),
-                          const SizedBox(height: 24),
-                        ],
+                    child: RefreshIndicator(
+                      onRefresh: _refreshHome,
+                      child: SingleChildScrollView(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        child: Column(
+                          children: [
+                            _buildHeader(
+                              context: context,
+                              totalNotificationCount: totalNotificationCount,
+                            ),
+                            const SizedBox(height: 18),
+                            _buildTodayCard(
+                              pendingSignalCount: pendingSignalCount,
+                              chatCount: chatCount,
+                            ),
+                            const SizedBox(height: 18),
+                            _buildFeatureSection(
+                              context: context,
+                              pendingSignalCount: pendingSignalCount,
+                              chatCount: chatCount,
+                            ),
+                            const SizedBox(height: 24),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -206,12 +218,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   const SizedBox(height: 18),
                   ElevatedButton.icon(
-                    onPressed: () {
-                      setState(() {
-                        currentUserFuture =
-                            UserProfileService.getCurrentUserProfile();
-                      });
-                    },
+                    onPressed: _refreshHome,
                     icon: const Icon(Icons.refresh_rounded),
                     label: const Text('Thử lại'),
                     style: ElevatedButton.styleFrom(

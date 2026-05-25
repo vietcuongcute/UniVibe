@@ -1,7 +1,7 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../services/chat_service.dart';
 import 'chat_detail_screen.dart';
 
 class ChatsScreen extends StatefulWidget {
@@ -14,28 +14,9 @@ class ChatsScreen extends StatefulWidget {
 class _ChatsScreenState extends State<ChatsScreen> {
   String get currentUserId => FirebaseAuth.instance.currentUser?.uid ?? '';
 
-  Stream<List<_ChatRoomViewData>> _chatRoomsStream() {
-    if (currentUserId.isEmpty) {
-      return Stream.value([]);
-    }
-
-    return FirebaseFirestore.instance
-        .collection('chatRooms')
-        .where('userIds', arrayContains: currentUserId)
-        .snapshots()
-        .map((snapshot) {
-          final rooms = snapshot.docs.map((doc) {
-            return _ChatRoomViewData.fromDoc(doc, currentUserId: currentUserId);
-          }).toList();
-
-          rooms.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-          return rooms;
-        });
-  }
-
   Future<void> _refresh() async {
     setState(() {});
-    await Future.delayed(const Duration(milliseconds: 350));
+    await Future.delayed(const Duration(milliseconds: 300));
   }
 
   @override
@@ -47,8 +28,8 @@ class _ChatsScreenState extends State<ChatsScreen> {
           children: [
             _buildHeader(context),
             Expanded(
-              child: StreamBuilder<List<_ChatRoomViewData>>(
-                stream: _chatRoomsStream(),
+              child: StreamBuilder<List<FirestoreChatRoom>>(
+                stream: ChatService.chatRoomsStream(currentUserId),
                 builder: (context, snapshot) {
                   if (snapshot.connectionState == ConnectionState.waiting) {
                     return const Center(
@@ -178,7 +159,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
     );
   }
 
-  Widget _buildChatCard(BuildContext context, _ChatRoomViewData room) {
+  Widget _buildChatCard(BuildContext context, FirestoreChatRoom room) {
     final avatarLetter = room.otherName.trim().isEmpty
         ? 'U'
         : room.otherName.trim()[0].toUpperCase();
@@ -410,91 +391,14 @@ class _ChatsScreenState extends State<ChatsScreen> {
     final now = DateTime.now();
     final difference = now.difference(time);
 
-    if (difference.inMinutes < 1) {
-      return 'Vừa xong';
-    }
-
-    if (difference.inMinutes < 60) {
-      return '${difference.inMinutes}p';
-    }
-
-    if (difference.inHours < 24) {
-      return '${difference.inHours}h';
-    }
-
-    if (difference.inDays < 7) {
-      return '${difference.inDays}d';
-    }
+    if (difference.inMinutes < 1) return 'Vừa xong';
+    if (difference.inMinutes < 60) return '${difference.inMinutes}p';
+    if (difference.inHours < 24) return '${difference.inHours}h';
+    if (difference.inDays < 7) return '${difference.inDays}d';
 
     final day = time.day.toString().padLeft(2, '0');
     final month = time.month.toString().padLeft(2, '0');
 
     return '$day/$month';
-  }
-}
-
-class _ChatRoomViewData {
-  final String id;
-  final String otherUserId;
-  final String otherName;
-  final String lastMessage;
-  final DateTime updatedAt;
-
-  _ChatRoomViewData({
-    required this.id,
-    required this.otherUserId,
-    required this.otherName,
-    required this.lastMessage,
-    required this.updatedAt,
-  });
-
-  factory _ChatRoomViewData.fromDoc(
-    DocumentSnapshot<Map<String, dynamic>> doc, {
-    required String currentUserId,
-  }) {
-    final data = doc.data() ?? {};
-
-    DateTime readDate(dynamic value) {
-      if (value is Timestamp) return value.toDate();
-      if (value is DateTime) return value;
-      return DateTime.now();
-    }
-
-    final userIds = (data['userIds'] as List<dynamic>? ?? [])
-        .map((item) => item.toString())
-        .toList();
-
-    String otherUserId = '';
-
-    for (final id in userIds) {
-      if (id != currentUserId) {
-        otherUserId = id;
-        break;
-      }
-    }
-
-    final members = data['members'];
-
-    String otherName = 'Người dùng UniVibe';
-
-    if (members is Map && otherUserId.isNotEmpty) {
-      final otherMember = members[otherUserId];
-
-      if (otherMember is Map) {
-        final nickname = otherMember['nickname']?.toString() ?? '';
-
-        if (nickname.trim().isNotEmpty) {
-          otherName = nickname.trim();
-        }
-      }
-    }
-
-    return _ChatRoomViewData(
-      id: doc.id,
-      otherUserId: otherUserId,
-      otherName: otherName,
-      lastMessage: data['lastMessage']?.toString() ?? '',
-      updatedAt: readDate(data['updatedAt']),
-    );
   }
 }

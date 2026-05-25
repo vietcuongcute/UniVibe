@@ -1,150 +1,217 @@
-import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
-import '../models/chat_message.dart';
-import '../models/chat_room.dart';
-import '../models/user_profile.dart';
+class FirestoreChatRoom {
+  final String id;
+  final List<String> userIds;
+  final String otherUserId;
+  final String otherName;
+  final String otherAvatarUrl;
+  final String otherUniversity;
+  final String otherMajor;
+  final int otherYear;
+  final String lastMessage;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+
+  FirestoreChatRoom({
+    required this.id,
+    required this.userIds,
+    required this.otherUserId,
+    required this.otherName,
+    required this.otherAvatarUrl,
+    required this.otherUniversity,
+    required this.otherMajor,
+    required this.otherYear,
+    required this.lastMessage,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+
+  factory FirestoreChatRoom.fromDoc(
+    DocumentSnapshot<Map<String, dynamic>> doc, {
+    required String currentUserId,
+  }) {
+    final data = doc.data() ?? {};
+
+    final userIds = (data['userIds'] as List<dynamic>? ?? [])
+        .map((item) => item.toString())
+        .toList();
+
+    String otherUserId = '';
+    for (final id in userIds) {
+      if (id != currentUserId) {
+        otherUserId = id;
+        break;
+      }
+    }
+
+    final members = data['members'];
+    Map<String, dynamic> otherMember = {};
+
+    if (members is Map && otherUserId.isNotEmpty) {
+      final rawOther = members[otherUserId];
+      if (rawOther is Map) {
+        otherMember = rawOther.map(
+          (key, value) => MapEntry(key.toString(), value),
+        );
+      }
+    }
+
+    return FirestoreChatRoom(
+      id: doc.id,
+      userIds: userIds,
+      otherUserId: otherUserId,
+      otherName: otherMember['nickname']?.toString() ?? 'Người dùng UniVibe',
+      otherAvatarUrl: otherMember['avatarUrl']?.toString() ?? '',
+      otherUniversity: otherMember['university']?.toString() ?? '',
+      otherMajor: otherMember['major']?.toString() ?? '',
+      otherYear: _parseInt(otherMember['year']),
+      lastMessage: data['lastMessage']?.toString() ?? '',
+      createdAt: _parseDate(data['createdAt']),
+      updatedAt: _parseDate(data['updatedAt']),
+    );
+  }
+
+  static DateTime _parseDate(dynamic value) {
+    if (value is Timestamp) return value.toDate();
+    if (value is DateTime) return value;
+    if (value is String) return DateTime.tryParse(value) ?? DateTime.now();
+    return DateTime.now();
+  }
+
+  static int _parseInt(dynamic value) {
+    if (value is int) return value;
+    if (value is String) return int.tryParse(value) ?? 1;
+    return 1;
+  }
+}
+
+class FirestoreChatMessage {
+  final String id;
+  final String chatRoomId;
+  final String senderId;
+  final String text;
+  final DateTime createdAt;
+
+  FirestoreChatMessage({
+    required this.id,
+    required this.chatRoomId,
+    required this.senderId,
+    required this.text,
+    required this.createdAt,
+  });
+
+  factory FirestoreChatMessage.fromDoc(
+    DocumentSnapshot<Map<String, dynamic>> doc,
+  ) {
+    final data = doc.data() ?? {};
+
+    return FirestoreChatMessage(
+      id: doc.id,
+      chatRoomId: data['chatRoomId']?.toString() ?? '',
+      senderId: data['senderId']?.toString() ?? '',
+      text: data['text']?.toString() ?? '',
+      createdAt: _parseDate(data['createdAt']),
+    );
+  }
+
+  static DateTime _parseDate(dynamic value) {
+    if (value is Timestamp) return value.toDate();
+    if (value is DateTime) return value;
+    if (value is String) return DateTime.tryParse(value) ?? DateTime.now();
+    return DateTime.now();
+  }
+}
 
 class ChatService {
-  static final ValueNotifier<List<ChatRoom>> chatRoomsNotifier =
-      ValueNotifier<List<ChatRoom>>([]);
+  static final FirebaseFirestore _db = FirebaseFirestore.instance;
+  static final FirebaseAuth _auth = FirebaseAuth.instance;
 
-  static List<ChatRoom> get chatRooms => chatRoomsNotifier.value;
-
-  static bool hasChatRoomWith(String userId) {
-    return chatRooms.any((room) => room.otherUser.id == userId);
+  static CollectionReference<Map<String, dynamic>> get _chatRoomsRef {
+    return _db.collection('chatRooms');
   }
 
-  static ChatRoom? getChatRoomWith(String userId) {
-    try {
-      return chatRooms.firstWhere((room) => room.otherUser.id == userId);
-    } catch (_) {
-      return null;
+  static String get currentUserId => _auth.currentUser?.uid ?? '';
+
+  static Stream<List<FirestoreChatRoom>> chatRoomsStream(String currentUserId) {
+    if (currentUserId.isEmpty) {
+      return Stream.value([]);
     }
+
+    return _chatRoomsRef
+        .where('userIds', arrayContains: currentUserId)
+        .snapshots()
+        .map((snapshot) {
+          final rooms = snapshot.docs.map((doc) {
+            return FirestoreChatRoom.fromDoc(doc, currentUserId: currentUserId);
+          }).toList();
+
+          rooms.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+          return rooms;
+        });
   }
 
-  static ChatRoom createChatRoom({
-    required UserProfile currentUser,
-    required UserProfile otherUser,
-  }) {
-    final existedRoom = getChatRoomWith(otherUser.id);
+  static Stream<FirestoreChatRoom?> chatRoomStream(String chatRoomId) {
+    final uid = currentUserId;
 
-    if (existedRoom != null) {
-      return existedRoom;
+    if (uid.isEmpty) {
+      return Stream.value(null);
     }
 
-    final now = DateTime.now();
-    final roomId =
-        'chat_${currentUser.id}_${otherUser.id}_${now.millisecondsSinceEpoch}';
+    return _chatRoomsRef.doc(chatRoomId).snapshots().map((doc) {
+      if (!doc.exists) return null;
 
-    final welcomeMessage = ChatMessage(
-      id: 'msg_${now.millisecondsSinceEpoch}',
-      chatId: roomId,
-      senderId: 'system',
-      text:
-          'Hai bạn đã mutual signal 🎉 Bây giờ có thể trò chuyện với nhau rồi!',
-      createdAt: now,
+      return FirestoreChatRoom.fromDoc(doc, currentUserId: uid);
+    });
+  }
+
+  static Stream<List<FirestoreChatMessage>> messagesStream(String chatRoomId) {
+    return _chatRoomsRef.doc(chatRoomId).collection('messages').snapshots().map(
+      (snapshot) {
+        final messages = snapshot.docs
+            .map((doc) => FirestoreChatMessage.fromDoc(doc))
+            .toList();
+
+        messages.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+        return messages;
+      },
     );
-
-    final newRoom = ChatRoom(
-      id: roomId,
-      userIds: [currentUser.id, otherUser.id],
-      otherUser: otherUser,
-      lastMessage: welcomeMessage.text,
-      createdAt: now,
-      updatedAt: now,
-      messages: [welcomeMessage],
-    );
-
-    chatRoomsNotifier.value = [newRoom, ...chatRoomsNotifier.value];
-
-    return newRoom;
   }
 
-  static ChatRoom? getChatRoomById(String chatRoomId) {
-    try {
-      return chatRooms.firstWhere((room) => room.id == chatRoomId);
-    } catch (_) {
-      return null;
-    }
-  }
-
-  static void sendMessage({
+  static Future<void> sendMessage({
     required String chatRoomId,
-    required String senderId,
     required String text,
-  }) {
+  }) async {
+    final user = _auth.currentUser;
     final trimmedText = text.trim();
 
-    if (trimmedText.isEmpty) {
-      return;
+    if (user == null) {
+      throw Exception('Bạn chưa đăng nhập');
     }
 
-    final roomIndex = chatRooms.indexWhere((room) => room.id == chatRoomId);
+    if (trimmedText.isEmpty) return;
 
-    if (roomIndex == -1) {
-      return;
-    }
-
-    final currentRoom = chatRooms[roomIndex];
     final now = DateTime.now();
+    final chatRoomRef = _chatRoomsRef.doc(chatRoomId);
+    final messageRef = chatRoomRef.collection('messages').doc();
 
-    final newMessage = ChatMessage(
-      id: 'msg_${now.millisecondsSinceEpoch}',
-      chatId: chatRoomId,
-      senderId: senderId,
-      text: trimmedText,
-      createdAt: now,
-    );
+    final batch = _db.batch();
 
-    final updatedRoom = currentRoom.copyWith(
-      messages: [...currentRoom.messages, newMessage],
-      lastMessage: trimmedText,
-      updatedAt: now,
-    );
+    batch.set(messageRef, {
+      'id': messageRef.id,
+      'chatRoomId': chatRoomId,
+      'senderId': user.uid,
+      'text': trimmedText,
+      'createdAt': Timestamp.fromDate(now),
+    });
 
-    final updatedRooms = [...chatRooms];
-    updatedRooms[roomIndex] = updatedRoom;
+    batch.update(chatRoomRef, {
+      'lastMessage': trimmedText,
+      'lastMessageSenderId': user.uid,
+      'updatedAt': Timestamp.fromDate(now),
+    });
 
-    updatedRooms.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-
-    chatRoomsNotifier.value = updatedRooms;
-  }
-
-  static String hideChatRoom(ChatRoom room) {
-    final updatedRooms = chatRooms.where((chatRoom) {
-      return chatRoom.id != room.id;
-    }).toList();
-
-    chatRoomsNotifier.value = updatedRooms;
-
-    return 'Đã ẩn đoạn chat với ${room.otherUser.nickname}.';
-  }
-
-  static String deleteChatRoom(ChatRoom room) {
-    final updatedRooms = chatRooms.where((chatRoom) {
-      return chatRoom.id != room.id;
-    }).toList();
-
-    chatRoomsNotifier.value = updatedRooms;
-
-    return 'Đã xoá đoạn chat với ${room.otherUser.nickname}.';
-  }
-
-  static String restoreChatRoom(ChatRoom room) {
-    if (chatRooms.any((chatRoom) => chatRoom.id == room.id)) {
-      return 'Đoạn chat đã tồn tại.';
-    }
-
-    final updatedRooms = [room, ...chatRooms];
-
-    updatedRooms.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-
-    chatRoomsNotifier.value = updatedRooms;
-
-    return 'Đã khôi phục đoạn chat với ${room.otherUser.nickname}.';
-  }
-
-  static void clearChats() {
-    chatRoomsNotifier.value = [];
+    await batch.commit();
   }
 }

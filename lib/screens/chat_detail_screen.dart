@@ -1,12 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../data/mock_users.dart';
-import '../models/chat_message.dart';
-import '../models/chat_room.dart';
-import '../models/user_profile.dart';
-import '../services/block_service.dart';
 import '../services/chat_service.dart';
-import '../services/report_service.dart';
 
 class ChatDetailScreen extends StatefulWidget {
   final String chatRoomId;
@@ -19,39 +13,81 @@ class ChatDetailScreen extends StatefulWidget {
 
 class _ChatDetailScreenState extends State<ChatDetailScreen> {
   final TextEditingController messageController = TextEditingController();
+  final ScrollController scrollController = ScrollController();
+
+  bool isSending = false;
 
   @override
   void dispose() {
     messageController.dispose();
-
+    scrollController.dispose();
     super.dispose();
   }
 
-  void sendMessage() {
+  Future<void> sendMessage() async {
     final text = messageController.text.trim();
 
-    if (text.isEmpty) {
-      return;
+    if (text.isEmpty || isSending) return;
+
+    setState(() {
+      isSending = true;
+    });
+
+    try {
+      await ChatService.sendMessage(chatRoomId: widget.chatRoomId, text: text);
+
+      messageController.clear();
+
+      await Future.delayed(const Duration(milliseconds: 150));
+
+      if (scrollController.hasClients) {
+        scrollController.animateTo(
+          scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOut,
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Gửi tin nhắn thất bại: $e'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          isSending = false;
+        });
+      }
     }
-
-    ChatService.sendMessage(
-      chatRoomId: widget.chatRoomId,
-      senderId: currentUser.id,
-      text: text,
-    );
-
-    messageController.clear();
   }
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<List<ChatRoom>>(
-      valueListenable: ChatService.chatRoomsNotifier,
-      builder: (context, rooms, child) {
-        final room = ChatService.getChatRoomById(widget.chatRoomId);
+    return StreamBuilder<FirestoreChatRoom?>(
+      stream: ChatService.chatRoomStream(widget.chatRoomId),
+      builder: (context, roomSnapshot) {
+        if (roomSnapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            backgroundColor: Color(0xFFF7F3FF),
+            body: Center(
+              child: CircularProgressIndicator(color: Color(0xFF7B61FF)),
+            ),
+          );
+        }
+
+        if (roomSnapshot.hasError) {
+          return _buildErrorScaffold(roomSnapshot.error.toString());
+        }
+
+        final room = roomSnapshot.data;
 
         if (room == null) {
           return const Scaffold(
+            backgroundColor: Color(0xFFF7F3FF),
             body: Center(child: Text('Không tìm thấy phòng chat.')),
           );
         }
@@ -63,13 +99,50 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               children: [
                 _buildHeader(context, room),
                 Expanded(
-                  child: ListView.builder(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-                    itemCount: room.messages.length,
-                    itemBuilder: (context, index) {
-                      final message = room.messages[index];
+                  child: StreamBuilder<List<FirestoreChatMessage>>(
+                    stream: ChatService.messagesStream(widget.chatRoomId),
+                    builder: (context, messageSnapshot) {
+                      if (messageSnapshot.connectionState ==
+                          ConnectionState.waiting) {
+                        return const Center(
+                          child: CircularProgressIndicator(
+                            color: Color(0xFF7B61FF),
+                          ),
+                        );
+                      }
 
-                      return _buildMessageBubble(message);
+                      if (messageSnapshot.hasError) {
+                        return Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(24),
+                            child: Text(
+                              messageSnapshot.error.toString(),
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                        );
+                      }
+
+                      final messages = messageSnapshot.data ?? [];
+
+                      if (messages.isEmpty) {
+                        return const Center(
+                          child: Text(
+                            'Chưa có tin nhắn. Hãy bắt đầu cuộc trò chuyện!',
+                            style: TextStyle(color: Colors.black54),
+                          ),
+                        );
+                      }
+
+                      return ListView.builder(
+                        controller: scrollController,
+                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+                        itemCount: messages.length,
+                        itemBuilder: (context, index) {
+                          final message = messages[index];
+                          return _buildMessageBubble(message);
+                        },
+                      );
                     },
                   ),
                 ),
@@ -82,7 +155,11 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     );
   }
 
-  Widget _buildHeader(BuildContext context, ChatRoom room) {
+  Widget _buildHeader(BuildContext context, FirestoreChatRoom room) {
+    final avatarLetter = room.otherName.trim().isEmpty
+        ? 'U'
+        : room.otherName.trim()[0].toUpperCase();
+
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
       decoration: const BoxDecoration(
@@ -107,7 +184,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               width: 40,
               height: 40,
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.18),
+                color: Colors.white.withOpacity(0.18),
                 shape: BoxShape.circle,
               ),
               child: const Icon(
@@ -122,7 +199,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             radius: 24,
             backgroundColor: Colors.white,
             child: Text(
-              room.otherUser.nickname[0].toUpperCase(),
+              avatarLetter,
               style: const TextStyle(
                 color: Color(0xFF6A11CB),
                 fontSize: 20,
@@ -136,7 +213,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  room.otherUser.nickname,
+                  room.otherName,
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 17,
@@ -144,33 +221,13 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                   ),
                 ),
                 const SizedBox(height: 3),
-                const Text(
-                  'Đã mutual signal',
-                  style: TextStyle(color: Colors.white70, fontSize: 13),
+                Text(
+                  room.otherMajor.isEmpty
+                      ? 'Đã mutual signal'
+                      : '${room.otherMajor} · Năm ${room.otherYear}',
+                  style: const TextStyle(color: Colors.white70, fontSize: 13),
                 ),
               ],
-            ),
-          ),
-          InkWell(
-            borderRadius: BorderRadius.circular(100),
-            onTap: () {
-              _showChatSafetyBottomSheet(
-                context: context,
-                user: room.otherUser,
-              );
-            },
-            child: Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.18),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.more_horiz_rounded,
-                color: Colors.white,
-                size: 23,
-              ),
             ),
           ),
         ],
@@ -178,8 +235,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     );
   }
 
-  Widget _buildMessageBubble(ChatMessage message) {
-    final bool isMe = message.senderId == currentUser.id;
+  Widget _buildMessageBubble(FirestoreChatMessage message) {
+    final currentUserId = ChatService.currentUserId;
+    final bool isMe = message.senderId == currentUserId;
     final bool isSystem = message.senderId == 'system';
 
     if (isSystem) {
@@ -190,7 +248,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(100),
-            border: Border.all(color: Colors.purple.withValues(alpha: 0.12)),
+            border: Border.all(color: Colors.purple.withOpacity(0.12)),
           ),
           child: Text(
             message.text,
@@ -221,7 +279,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.purple.withValues(alpha: 0.06),
+              color: Colors.purple.withOpacity(0.06),
               blurRadius: 12,
               offset: const Offset(0, 6),
             ),
@@ -261,7 +319,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         color: Colors.white,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
+            color: Colors.black.withOpacity(0.06),
             blurRadius: 18,
             offset: const Offset(0, -5),
           ),
@@ -274,6 +332,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               controller: messageController,
               minLines: 1,
               maxLines: 4,
+              enabled: !isSending,
               decoration: InputDecoration(
                 hintText: 'Nhập tin nhắn...',
                 filled: true,
@@ -292,7 +351,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           const SizedBox(width: 10),
           InkWell(
             borderRadius: BorderRadius.circular(18),
-            onTap: sendMessage,
+            onTap: isSending ? null : sendMessage,
             child: Container(
               width: 48,
               height: 48,
@@ -304,11 +363,19 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                 ),
                 borderRadius: BorderRadius.circular(18),
               ),
-              child: const Icon(
-                Icons.send_rounded,
-                color: Colors.white,
-                size: 21,
-              ),
+              child: isSending
+                  ? const Padding(
+                      padding: EdgeInsets.all(13),
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Icon(
+                      Icons.send_rounded,
+                      color: Colors.white,
+                      size: 21,
+                    ),
             ),
           ),
         ],
@@ -316,319 +383,21 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     );
   }
 
-  void _showChatSafetyBottomSheet({
-    required BuildContext context,
-    required UserProfile user,
-  }) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (bottomSheetContext) {
-        return Container(
-          padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.only(
-              topLeft: Radius.circular(28),
-              topRight: Radius.circular(28),
-            ),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 46,
-                height: 5,
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade300,
-                  borderRadius: BorderRadius.circular(100),
-                ),
-              ),
-              const SizedBox(height: 20),
-              Row(
-                children: [
-                  CircleAvatar(
-                    radius: 26,
-                    backgroundColor: const Color(0xFF7B61FF),
-                    child: Text(
-                      user.nickname[0].toUpperCase(),
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 20,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      user.nickname,
-                      style: const TextStyle(
-                        fontSize: 19,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 18),
-              _buildSafetyAction(
-                icon: Icons.flag_rounded,
-                color: const Color(0xFFFF9800),
-                title: 'Report user',
-                subtitle: 'Báo cáo tin nhắn hoặc hành vi không phù hợp.',
-                onTap: () {
-                  Navigator.pop(bottomSheetContext);
-
-                  _showReportDialog(context: context, user: user);
-                },
-              ),
-              const SizedBox(height: 12),
-              _buildSafetyAction(
-                icon: Icons.block_rounded,
-                color: const Color(0xFFE53935),
-                title: 'Block user',
-                subtitle: 'Chặn người này và ẩn khỏi Daily Match.',
-                onTap: () {
-                  Navigator.pop(bottomSheetContext);
-
-                  _showBlockConfirmDialog(context: context, user: user);
-                },
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildSafetyAction({
-    required IconData icon,
-    required Color color,
-    required String title,
-    required String subtitle,
-    required VoidCallback onTap,
-  }) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(18),
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: color.withValues(alpha: 0.16)),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.14),
-                borderRadius: BorderRadius.circular(15),
-              ),
-              child: Icon(icon, color: color),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: TextStyle(
-                      color: color,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 15,
-                    ),
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    subtitle,
-                    style: const TextStyle(
-                      color: Colors.black54,
-                      fontSize: 12.5,
-                      height: 1.3,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
+  Widget _buildErrorScaffold(String error) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF7F3FF),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text(error, textAlign: TextAlign.center),
         ),
       ),
-    );
-  }
-
-  void _showReportDialog({
-    required BuildContext context,
-    required UserProfile user,
-  }) {
-    String selectedReason = 'Tin nhắn không phù hợp';
-
-    final detailController = TextEditingController();
-
-    final List<String> reasons = [
-      'Tin nhắn không phù hợp',
-      'Làm phiền',
-      'Giả mạo danh tính',
-      'Nội dung phản cảm',
-      'Hành vi không an toàn',
-      'Khác',
-    ];
-
-    showDialog(
-      context: context,
-      builder: (dialogContext) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(22),
-              ),
-              title: const Text('Report user'),
-              content: SingleChildScrollView(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Bạn muốn báo cáo ${user.nickname} vì lý do gì?',
-                      style: const TextStyle(
-                        color: Colors.black54,
-                        height: 1.35,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    DropdownButtonFormField<String>(
-                      initialValue: selectedReason,
-                      decoration: InputDecoration(
-                        labelText: 'Lý do',
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                      ),
-                      items: reasons.map((reason) {
-                        return DropdownMenuItem<String>(
-                          value: reason,
-                          child: Text(reason),
-                        );
-                      }).toList(),
-                      onChanged: (value) {
-                        if (value != null) {
-                          setDialogState(() {
-                            selectedReason = value;
-                          });
-                        }
-                      },
-                    ),
-                    const SizedBox(height: 14),
-                    TextField(
-                      controller: detailController,
-                      maxLines: 3,
-                      decoration: InputDecoration(
-                        labelText: 'Mô tả thêm',
-                        hintText: 'Nhập thêm chi tiết nếu cần...',
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () {
-                    Navigator.pop(dialogContext);
-                  },
-                  child: const Text('Hủy'),
-                ),
-                ElevatedButton(
-                  onPressed: () {
-                    final result = ReportService.reportUser(
-                      currentUser: currentUser,
-                      targetUser: user,
-                      reason: selectedReason,
-                      detail: detailController.text.trim(),
-                    );
-
-                    Navigator.pop(dialogContext);
-
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(result),
-                        behavior: SnackBarBehavior.floating,
-                      ),
-                    );
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFFF9800),
-                    foregroundColor: Colors.white,
-                  ),
-                  child: const Text('Gửi report'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
-
-  void _showBlockConfirmDialog({
-    required BuildContext context,
-    required UserProfile user,
-  }) {
-    showDialog(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(22),
-          ),
-          title: const Text('Block user'),
-          content: Text(
-            'Bạn có chắc muốn block ${user.nickname}? Người này sẽ bị ẩn khỏi Daily Match và bạn nên rời khỏi phòng chat này.',
-            style: const TextStyle(color: Colors.black54, height: 1.4),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.pop(dialogContext);
-              },
-              child: const Text('Hủy'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                final result = BlockService.blockUser(user);
-
-                Navigator.pop(dialogContext);
-                Navigator.pop(context);
-
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(result),
-                    behavior: SnackBarBehavior.floating,
-                  ),
-                );
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFE53935),
-                foregroundColor: Colors.white,
-              ),
-              child: const Text('Block'),
-            ),
-          ],
-        );
-      },
     );
   }
 
   String _formatTime(DateTime time) {
     final hour = time.hour.toString().padLeft(2, '0');
     final minute = time.minute.toString().padLeft(2, '0');
-
     return '$hour:$minute';
   }
 }

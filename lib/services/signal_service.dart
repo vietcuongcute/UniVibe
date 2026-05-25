@@ -80,8 +80,8 @@ class SignalService {
 
     final todaySignals = snapshot.docs.where((doc) {
       final signal = VibeSignal.fromFirestore(doc);
-      return signal.createdAt.isAfter(today) ||
-          signal.createdAt.isAtSameMomentAs(today);
+      return signal.createdAt.isAtSameMomentAs(today) ||
+          signal.createdAt.isAfter(today);
     }).length;
 
     return todaySignals < dailySignalLimit;
