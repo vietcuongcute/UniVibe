@@ -21,6 +21,10 @@ class SignalService {
     return '${ids[0]}_${ids[1]}';
   }
 
+  static List<String> _sortedUserIds(String uid1, String uid2) {
+    return [uid1, uid2]..sort();
+  }
+
   static String _signalDocId({
     required String senderId,
     required String receiverId,
@@ -32,7 +36,22 @@ class SignalService {
     return 'chat_${_pairId(uid1, uid2)}';
   }
 
+  static Map<String, dynamic> _memberMap(UserProfile user) {
+    return {
+      'id': user.id,
+      'nickname': user.nickname,
+      'avatarUrl': user.avatarUrl,
+      'university': user.university,
+      'major': user.major,
+      'year': user.year,
+    };
+  }
+
   static Stream<List<VibeSignal>> receivedSignalsStream(String currentUserId) {
+    if (currentUserId.isEmpty) {
+      return Stream.value([]);
+    }
+
     return _signalsRef
         .where('receiverId', isEqualTo: currentUserId)
         .snapshots()
@@ -47,6 +66,10 @@ class SignalService {
   }
 
   static Stream<List<VibeSignal>> sentSignalsStream(String currentUserId) {
+    if (currentUserId.isEmpty) {
+      return Stream.value([]);
+    }
+
     return _signalsRef
         .where('senderId', isEqualTo: currentUserId)
         .snapshots()
@@ -64,6 +87,10 @@ class SignalService {
     required String currentUserId,
     required String receiverId,
   }) async {
+    if (currentUserId.isEmpty || receiverId.isEmpty) {
+      return false;
+    }
+
     final docId = _signalDocId(senderId: currentUserId, receiverId: receiverId);
 
     final doc = await _signalsRef.doc(docId).get();
@@ -71,6 +98,10 @@ class SignalService {
   }
 
   static Future<bool> canSendSignal(String currentUserId) async {
+    if (currentUserId.isEmpty) {
+      return false;
+    }
+
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
 
@@ -93,6 +124,10 @@ class SignalService {
     String type = 'vibe',
     String message = 'Bạn có vẻ cùng vibe với mình!',
   }) async {
+    if (currentUser.id.isEmpty || receiver.id.isEmpty) {
+      return 'Không gửi được signal vì thiếu thông tin người dùng.';
+    }
+
     if (currentUser.id == receiver.id) {
       return 'Bạn không thể tự gửi signal cho chính mình.';
     }
@@ -125,6 +160,7 @@ class SignalService {
     final now = DateTime.now();
     final pairId = _pairId(currentUser.id, receiver.id);
     final chatRoomId = chatRoomIdFor(currentUser.id, receiver.id);
+    final userIds = _sortedUserIds(currentUser.id, receiver.id);
     final bool isMutual = oppositeSignal.exists;
 
     final newSignal = VibeSignal(
@@ -148,7 +184,7 @@ class SignalService {
     batch.set(newSignalRef, {
       ...newSignal.toFirestore(),
       'pairId': pairId,
-      'userIds': [currentUser.id, receiver.id],
+      'userIds': userIds,
     });
 
     if (isMutual) {
@@ -162,35 +198,22 @@ class SignalService {
 
       batch.set(chatRoomRef, {
         'id': chatRoomId,
-        'userIds': [currentUser.id, receiver.id],
+        'type': 'direct',
+        'source': 'mutual_signal',
+        'userIds': userIds,
         'pairId': pairId,
         'createdAt': Timestamp.fromDate(now),
         'updatedAt': Timestamp.fromDate(now),
+        'deletedFor': <String>[],
         'lastMessage': 'Hai bạn đã mutual signal 🎉',
         'lastMessageSenderId': 'system',
         'members': {
-          currentUser.id: {
-            'id': currentUser.id,
-            'nickname': currentUser.nickname,
-            'avatarUrl': currentUser.avatarUrl,
-            'university': currentUser.university,
-            'major': currentUser.major,
-            'year': currentUser.year,
-          },
-          receiver.id: {
-            'id': receiver.id,
-            'nickname': receiver.nickname,
-            'avatarUrl': receiver.avatarUrl,
-            'university': receiver.university,
-            'major': receiver.major,
-            'year': receiver.year,
-          },
+          currentUser.id: _memberMap(currentUser),
+          receiver.id: _memberMap(receiver),
         },
       }, SetOptions(merge: true));
 
-      final welcomeMessageRef = chatRoomRef
-          .collection('messages')
-          .doc('welcome');
+      final welcomeMessageRef = chatRoomRef.collection('messages').doc();
 
       batch.set(welcomeMessageRef, {
         'id': welcomeMessageRef.id,
@@ -199,7 +222,7 @@ class SignalService {
         'text':
             'Hai bạn đã mutual signal 🎉 Bây giờ có thể trò chuyện với nhau rồi!',
         'createdAt': Timestamp.fromDate(now),
-      }, SetOptions(merge: true));
+      });
     }
 
     await batch.commit();

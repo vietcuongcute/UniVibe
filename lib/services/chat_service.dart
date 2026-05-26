@@ -1,9 +1,12 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+import '../models/user_profile.dart';
+
 class FirestoreChatRoom {
   final String id;
   final List<String> userIds;
+  final List<String> deletedFor;
   final String otherUserId;
   final String otherName;
   final String otherAvatarUrl;
@@ -11,12 +14,14 @@ class FirestoreChatRoom {
   final String otherMajor;
   final int otherYear;
   final String lastMessage;
+  final String lastMessageSenderId;
   final DateTime createdAt;
   final DateTime updatedAt;
 
   FirestoreChatRoom({
     required this.id,
     required this.userIds,
+    required this.deletedFor,
     required this.otherUserId,
     required this.otherName,
     required this.otherAvatarUrl,
@@ -24,9 +29,26 @@ class FirestoreChatRoom {
     required this.otherMajor,
     required this.otherYear,
     required this.lastMessage,
+    required this.lastMessageSenderId,
     required this.createdAt,
     required this.updatedAt,
   });
+
+  UserProfile get otherUser {
+    return UserProfile(
+      id: otherUserId,
+      nickname: otherName,
+      avatarUrl: otherAvatarUrl,
+      university: otherUniversity,
+      major: otherMajor,
+      year: otherYear,
+      gender: '',
+      interests: const [],
+      goals: const [],
+      vibeTags: const [],
+      bio: '',
+    );
+  }
 
   factory FirestoreChatRoom.fromDoc(
     DocumentSnapshot<Map<String, dynamic>> doc, {
@@ -34,9 +56,8 @@ class FirestoreChatRoom {
   }) {
     final data = doc.data() ?? {};
 
-    final userIds = (data['userIds'] as List<dynamic>? ?? [])
-        .map((item) => item.toString())
-        .toList();
+    final userIds = _parseStringList(data['userIds']);
+    final deletedFor = _parseStringList(data['deletedFor']);
 
     String otherUserId = '';
     for (final id in userIds) {
@@ -46,9 +67,8 @@ class FirestoreChatRoom {
       }
     }
 
-    final members = data['members'];
     Map<String, dynamic> otherMember = {};
-
+    final members = data['members'];
     if (members is Map && otherUserId.isNotEmpty) {
       final rawOther = members[otherUserId];
       if (rawOther is Map) {
@@ -61,6 +81,7 @@ class FirestoreChatRoom {
     return FirestoreChatRoom(
       id: doc.id,
       userIds: userIds,
+      deletedFor: deletedFor,
       otherUserId: otherUserId,
       otherName: otherMember['nickname']?.toString() ?? 'Người dùng UniVibe',
       otherAvatarUrl: otherMember['avatarUrl']?.toString() ?? '',
@@ -68,9 +89,17 @@ class FirestoreChatRoom {
       otherMajor: otherMember['major']?.toString() ?? '',
       otherYear: _parseInt(otherMember['year']),
       lastMessage: data['lastMessage']?.toString() ?? '',
+      lastMessageSenderId: data['lastMessageSenderId']?.toString() ?? '',
       createdAt: _parseDate(data['createdAt']),
       updatedAt: _parseDate(data['updatedAt']),
     );
+  }
+
+  static List<String> _parseStringList(dynamic value) {
+    if (value is List) {
+      return value.map((item) => item.toString()).toList();
+    }
+    return [];
   }
 
   static DateTime _parseDate(dynamic value) {
@@ -134,6 +163,22 @@ class ChatService {
 
   static String get currentUserId => _auth.currentUser?.uid ?? '';
 
+  static String _directRoomId(String userA, String userB) {
+    final ids = [userA, userB]..sort();
+    return 'chat_${ids[0]}_${ids[1]}';
+  }
+
+  static Map<String, dynamic> _memberMap(UserProfile user) {
+    return {
+      'id': user.id,
+      'nickname': user.nickname,
+      'avatarUrl': user.avatarUrl,
+      'university': user.university,
+      'major': user.major,
+      'year': user.year,
+    };
+  }
+
   static Stream<List<FirestoreChatRoom>> chatRoomsStream(String currentUserId) {
     if (currentUserId.isEmpty) {
       return Stream.value([]);
@@ -143,9 +188,15 @@ class ChatService {
         .where('userIds', arrayContains: currentUserId)
         .snapshots()
         .map((snapshot) {
-          final rooms = snapshot.docs.map((doc) {
-            return FirestoreChatRoom.fromDoc(doc, currentUserId: currentUserId);
-          }).toList();
+          final rooms = snapshot.docs
+              .map((doc) {
+                return FirestoreChatRoom.fromDoc(
+                  doc,
+                  currentUserId: currentUserId,
+                );
+              })
+              .where((room) => !room.deletedFor.contains(currentUserId))
+              .toList();
 
           rooms.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
           return rooms;
@@ -154,7 +205,6 @@ class ChatService {
 
   static Stream<FirestoreChatRoom?> chatRoomStream(String chatRoomId) {
     final uid = currentUserId;
-
     if (uid.isEmpty) {
       return Stream.value(null);
     }
@@ -162,21 +212,81 @@ class ChatService {
     return _chatRoomsRef.doc(chatRoomId).snapshots().map((doc) {
       if (!doc.exists) return null;
 
-      return FirestoreChatRoom.fromDoc(doc, currentUserId: uid);
+      final room = FirestoreChatRoom.fromDoc(doc, currentUserId: uid);
+      if (room.deletedFor.contains(uid)) return null;
+
+      return room;
     });
   }
 
   static Stream<List<FirestoreChatMessage>> messagesStream(String chatRoomId) {
-    return _chatRoomsRef.doc(chatRoomId).collection('messages').snapshots().map(
-      (snapshot) {
-        final messages = snapshot.docs
-            .map((doc) => FirestoreChatMessage.fromDoc(doc))
-            .toList();
+    return _chatRoomsRef
+        .doc(chatRoomId)
+        .collection('messages')
+        .orderBy('createdAt', descending: false)
+        .snapshots()
+        .map((snapshot) {
+          return snapshot.docs.map((doc) {
+            return FirestoreChatMessage.fromDoc(doc);
+          }).toList();
+        });
+  }
 
-        messages.sort((a, b) => a.createdAt.compareTo(b.createdAt));
-        return messages;
-      },
-    );
+  static Future<String> createChatRoom({
+    required UserProfile currentUser,
+    required UserProfile otherUser,
+  }) async {
+    if (currentUser.id.isEmpty || otherUser.id.isEmpty) {
+      return 'Không tạo được phòng chat vì thiếu user id.';
+    }
+
+    if (currentUser.id == otherUser.id) {
+      return 'Không thể tự tạo phòng chat với chính mình.';
+    }
+
+    final roomId = _directRoomId(currentUser.id, otherUser.id);
+    final roomRef = _chatRoomsRef.doc(roomId);
+
+    await _db.runTransaction((transaction) async {
+      final snapshot = await transaction.get(roomRef);
+
+      if (snapshot.exists) {
+        transaction.update(roomRef, {
+          'deletedFor': FieldValue.arrayRemove([currentUser.id, otherUser.id]),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+        return;
+      }
+
+      final sortedUserIds = [currentUser.id, otherUser.id]..sort();
+
+      transaction.set(roomRef, {
+        'id': roomId,
+        'type': 'direct',
+        'source': 'mutual_signal',
+        'userIds': sortedUserIds,
+        'members': {
+          currentUser.id: _memberMap(currentUser),
+          otherUser.id: _memberMap(otherUser),
+        },
+        'deletedFor': <String>[],
+        'lastMessage': 'Hai bạn đã mutual signal 🎉',
+        'lastMessageSenderId': 'system',
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      final messageRef = roomRef.collection('messages').doc();
+      transaction.set(messageRef, {
+        'id': messageRef.id,
+        'chatRoomId': roomId,
+        'senderId': 'system',
+        'text': 'Hai bạn đã mutual signal 🎉',
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+    });
+
+    return 'Đã mở phòng chat.';
   }
 
   static Future<void> sendMessage({
@@ -187,12 +297,12 @@ class ChatService {
     final trimmedText = text.trim();
 
     if (user == null) {
-      throw Exception('Bạn chưa đăng nhập');
+      throw Exception('Bạn chưa đăng nhập.');
     }
 
     if (trimmedText.isEmpty) return;
 
-    final now = DateTime.now();
+    final now = Timestamp.fromDate(DateTime.now());
     final chatRoomRef = _chatRoomsRef.doc(chatRoomId);
     final messageRef = chatRoomRef.collection('messages').doc();
 
@@ -203,15 +313,44 @@ class ChatService {
       'chatRoomId': chatRoomId,
       'senderId': user.uid,
       'text': trimmedText,
-      'createdAt': Timestamp.fromDate(now),
+      'createdAt': now,
     });
 
     batch.update(chatRoomRef, {
       'lastMessage': trimmedText,
       'lastMessageSenderId': user.uid,
-      'updatedAt': Timestamp.fromDate(now),
+      'deletedFor': FieldValue.arrayRemove([user.uid]),
+      'updatedAt': now,
     });
 
     await batch.commit();
+  }
+
+  static Future<String> deleteChatRoomForCurrentUser(String chatRoomId) async {
+    final user = _auth.currentUser;
+    if (user == null) {
+      return 'Bạn chưa đăng nhập.';
+    }
+
+    await _chatRoomsRef.doc(chatRoomId).update({
+      'deletedFor': FieldValue.arrayUnion([user.uid]),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+
+    return 'Đã xoá đoạn chat khỏi danh sách của bạn.';
+  }
+
+  static Future<String> restoreChatRoomForCurrentUser(String chatRoomId) async {
+    final user = _auth.currentUser;
+    if (user == null) {
+      return 'Bạn chưa đăng nhập.';
+    }
+
+    await _chatRoomsRef.doc(chatRoomId).update({
+      'deletedFor': FieldValue.arrayRemove([user.uid]),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+
+    return 'Đã hoàn tác xoá đoạn chat.';
   }
 }

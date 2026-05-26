@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 import 'vibe_tab.dart';
 import 'confession_tab.dart';
@@ -32,6 +33,62 @@ class _HomeScreenState extends State<HomeScreen> {
     'Chat',
   ];
 
+  Future<void> _logout() async {
+    final messenger = ScaffoldMessenger.of(context);
+
+    await FirebaseAuth.instance.signOut();
+
+    if (!mounted) return;
+
+    messenger.showSnackBar(
+      const SnackBar(
+        content: Text('Đã đăng xuất.'),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  void _showLogoutConfirmDialog() {
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(22),
+          ),
+          title: const Text(
+            'Đăng xuất?',
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+          content: const Text(
+            'Bạn có chắc muốn đăng xuất tài khoản hiện tại không?',
+            style: TextStyle(color: Colors.black54, height: 1.4),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(dialogContext);
+              },
+              child: const Text('Hủy'),
+            ),
+            ElevatedButton.icon(
+              onPressed: () async {
+                Navigator.pop(dialogContext);
+                await _logout();
+              },
+              icon: const Icon(Icons.logout_rounded, size: 18),
+              label: const Text('Đăng xuất'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFE53935),
+                foregroundColor: Colors.white,
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -45,6 +102,13 @@ class _HomeScreenState extends State<HomeScreen> {
         backgroundColor: Colors.white,
         foregroundColor: const Color(0xFF2D1B69),
         elevation: 0,
+        actions: [
+          IconButton(
+            tooltip: 'Đăng xuất',
+            icon: const Icon(Icons.logout_rounded),
+            onPressed: _showLogoutConfirmDialog,
+          ),
+        ],
       ),
       body: IndexedStack(index: _currentIndex, children: _tabs),
       bottomNavigationBar: NavigationBar(
