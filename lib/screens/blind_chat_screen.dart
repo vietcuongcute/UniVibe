@@ -25,14 +25,14 @@ class _BlindChatScreenState extends State<BlindChatScreen> {
   }
 
   Future<void> _findBlindChat() async {
-    if (_isFinding) return;
+    if (_isFinding || _isWaiting) return;
 
     setState(() {
       _isFinding = true;
       _statusText = 'Đang tìm người phù hợp...';
     });
 
-    final result = await BlindChatMatchService.findOrWait();
+    final result = await BlindChatMatchService.startMatching();
 
     if (!mounted) return;
 
@@ -42,6 +42,10 @@ class _BlindChatScreenState extends State<BlindChatScreen> {
         _isWaiting = false;
         _statusText = result.message;
       });
+
+      await BlindChatMatchService.cleanupMyQueueAfterOpen();
+
+      if (!mounted) return;
 
       Navigator.pushReplacement(
         context,
@@ -80,13 +84,23 @@ class _BlindChatScreenState extends State<BlindChatScreen> {
   void _startPolling() {
     _pollTimer?.cancel();
 
-    _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) async {
-      final result = await BlindChatMatchService.findOrWait();
+    _pollTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
+      final result = await BlindChatMatchService.checkWaitingResult();
 
       if (!mounted) return;
 
       if (result.success && result.chatRoomId != null) {
         _pollTimer?.cancel();
+
+        setState(() {
+          _isFinding = false;
+          _isWaiting = false;
+          _statusText = result.message;
+        });
+
+        await BlindChatMatchService.cleanupMyQueueAfterOpen();
+
+        if (!mounted) return;
 
         Navigator.pushReplacement(
           context,
@@ -94,7 +108,21 @@ class _BlindChatScreenState extends State<BlindChatScreen> {
             builder: (_) => ChatDetailScreen(chatRoomId: result.chatRoomId!),
           ),
         );
+        return;
       }
+
+      if (result.success && result.waiting) {
+        setState(() {
+          _statusText = result.message;
+        });
+        return;
+      }
+
+      setState(() {
+        _isFinding = false;
+        _isWaiting = false;
+        _statusText = result.message;
+      });
     });
   }
 
@@ -251,7 +279,7 @@ class _BlindChatScreenState extends State<BlindChatScreen> {
               ? 'Đang tìm...'
               : _isWaiting
               ? 'Đang chờ...'
-              : 'Tìm Blind Chat',
+              : 'Tìm Blind Chat mới',
         ),
         style: ElevatedButton.styleFrom(
           backgroundColor: const Color(0xFFE91E63),
@@ -308,11 +336,12 @@ class _BlindChatScreenState extends State<BlindChatScreen> {
           ),
           SizedBox(height: 12),
           Text(
-            '• Cần 2 account khác nhau để ghép blind chat.\n'
+            '• Mỗi lần tìm là một blind chat mới.\n'
+            '• Không dùng lại phòng blind chat cũ.\n'
             '• Account đầu bấm tìm sẽ vào hàng chờ.\n'
-            '• Account thứ hai bấm tìm sẽ tạo phòng chat.\n'
-            '• Tin nhắn dùng chung hệ thống chat realtime hiện tại.\n'
-            '• Reveal profile sẽ làm ở bước sau.',
+            '• Account thứ hai bấm tìm sẽ tạo phòng chat mới.\n'
+            '• Người đang chờ sẽ tự mở phòng khi được ghép.\n'
+            '• Tin nhắn dùng chung hệ thống chat realtime hiện tại.',
             style: TextStyle(color: Colors.black54, height: 1.45),
           ),
         ],

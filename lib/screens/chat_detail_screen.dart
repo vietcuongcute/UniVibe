@@ -90,7 +90,12 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       builder: (context, roomSnapshot) {
         final room = roomSnapshot.data;
 
-        final displayName = room?.otherName.isNotEmpty == true
+        final isBlind = room?.type == 'blind';
+        final isRevealed = room?.isRevealed == true;
+
+        final displayName = isBlind && !isRevealed
+            ? 'Ẩn danh UniVibe'
+            : room?.otherName.isNotEmpty == true
             ? room!.otherName
             : 'Chat UniVibe';
 
@@ -106,10 +111,17 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                 CircleAvatar(
                   radius: 19,
                   backgroundColor: const Color(0xFFEDE7FF),
-                  backgroundImage: room?.otherAvatarUrl.isNotEmpty == true
-                      ? NetworkImage(room!.otherAvatarUrl)
+                  backgroundImage: !isBlind || isRevealed
+                      ? room?.otherAvatarUrl.isNotEmpty == true
+                            ? NetworkImage(room!.otherAvatarUrl)
+                            : null
                       : null,
-                  child: room == null || room.otherAvatarUrl.isEmpty
+                  child: isBlind && !isRevealed
+                      ? const Icon(
+                          Icons.visibility_off_rounded,
+                          color: Color(0xFF7B61FF),
+                        )
+                      : room == null || room.otherAvatarUrl.isEmpty
                       ? Text(
                           displayName[0].toUpperCase(),
                           style: const TextStyle(
@@ -135,6 +147,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           ),
           body: Column(
             children: [
+              if (isBlind && !isRevealed && room != null)
+                _buildRevealBanner(room),
+
               Expanded(
                 child: StreamBuilder<List<FirestoreChatMessage>>(
                   stream: ChatService.messagesStream(widget.chatRoomId),
@@ -289,6 +304,108 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           ),
         );
       },
+    );
+  }
+
+  Widget _buildRevealBanner(FirestoreChatRoom room) {
+    final hasRequested = ChatService.hasRequestedReveal(room);
+    final otherRequested = ChatService.otherUserRequestedReveal(room);
+
+    final bool shouldShowOtherRequestNotice = otherRequested && !hasRequested;
+
+    final String text = shouldShowOtherRequestNotice
+        ? 'Người kia muốn reveal profile 👀 Nếu bạn đồng ý, bấm Reveal.'
+        : hasRequested
+        ? 'Đã gửi yêu cầu reveal. Chờ người kia đồng ý.'
+        : 'Blind chat đang ẩn danh. Reveal nếu cả hai đồng ý.';
+
+    final IconData icon = shouldShowOtherRequestNotice
+        ? Icons.notifications_active_rounded
+        : hasRequested
+        ? Icons.hourglass_top_rounded
+        : Icons.visibility_off_rounded;
+
+    final Color mainColor = shouldShowOtherRequestNotice
+        ? const Color(0xFFFF9800)
+        : const Color(0xFFE91E63);
+
+    final Color backgroundColor = shouldShowOtherRequestNotice
+        ? const Color(0xFFFFF3E0)
+        : Colors.white;
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: mainColor.withOpacity(0.25)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: mainColor.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(15),
+            ),
+            child: Icon(icon, color: mainColor),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              text,
+              style: const TextStyle(
+                color: Color(0xFF2D1B69),
+                fontWeight: FontWeight.w700,
+                height: 1.3,
+                fontSize: 13,
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          ElevatedButton(
+            onPressed: hasRequested
+                ? null
+                : () async {
+                    final messenger = ScaffoldMessenger.of(context);
+
+                    final result = await ChatService.requestRevealProfile(
+                      widget.chatRoomId,
+                    );
+
+                    if (!mounted) return;
+
+                    messenger.showSnackBar(
+                      SnackBar(
+                        content: Text(result),
+                        behavior: SnackBarBehavior.floating,
+                      ),
+                    );
+                  },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: mainColor,
+              foregroundColor: Colors.white,
+              disabledBackgroundColor: Colors.grey.shade300,
+              disabledForegroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
+            child: Text(hasRequested ? 'Đã gửi' : 'Reveal'),
+          ),
+        ],
+      ),
     );
   }
 

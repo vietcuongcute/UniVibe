@@ -12,6 +12,9 @@ class FirestoreChatRoom extends ChatRoom {
   final String otherUniversity;
   final String otherMajor;
   final int otherYear;
+  final String type;
+  final bool isRevealed;
+  final List<String> revealRequests;
 
   FirestoreChatRoom({
     required String id,
@@ -25,6 +28,9 @@ class FirestoreChatRoom extends ChatRoom {
     required String lastMessage,
     required DateTime createdAt,
     required DateTime updatedAt,
+    required this.type,
+    required this.isRevealed,
+    required this.revealRequests,
   }) : super(
          id: id,
          userIds: userIds,
@@ -86,6 +92,9 @@ class FirestoreChatRoom extends ChatRoom {
       otherUniversity: otherMember['university']?.toString() ?? '',
       otherMajor: otherMember['major']?.toString() ?? '',
       otherYear: _parseInt(otherMember['year']),
+      type: data['type']?.toString() ?? 'normal',
+      isRevealed: data['isRevealed'] == true,
+      revealRequests: _parseStringList(data['revealRequests']),
       lastMessage: data['lastMessage']?.toString() ?? '',
       createdAt: _parseDate(data['createdAt']),
       updatedAt: _parseDate(data['updatedAt']),
@@ -103,6 +112,14 @@ class FirestoreChatRoom extends ChatRoom {
     if (value is int) return value;
     if (value is String) return int.tryParse(value) ?? 1;
     return 1;
+  }
+
+  static List<String> _parseStringList(dynamic value) {
+    if (value is List) {
+      return value.map((item) => item.toString()).toList();
+    }
+
+    return [];
   }
 }
 
@@ -166,9 +183,28 @@ class ChatService {
         .where('userIds', arrayContains: currentUserId)
         .snapshots()
         .map((snapshot) {
-          final rooms = snapshot.docs.map((doc) {
-            return FirestoreChatRoom.fromDoc(doc, currentUserId: currentUserId);
-          }).toList();
+          final rooms = snapshot.docs
+              .where((doc) {
+                final data = doc.data();
+
+                final deletedFor = (data['deletedFor'] as List? ?? [])
+                    .map((item) => item.toString())
+                    .toList();
+
+                final status = data['status']?.toString() ?? 'active';
+
+                if (deletedFor.contains(currentUserId)) return false;
+                if (status == 'ended') return false;
+
+                return true;
+              })
+              .map((doc) {
+                return FirestoreChatRoom.fromDoc(
+                  doc,
+                  currentUserId: currentUserId,
+                );
+              })
+              .toList();
 
           rooms.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
           chatRoomsNotifier.value = rooms;
@@ -312,5 +348,138 @@ class ChatService {
     } catch (e) {
       return 'Hoàn tác thất bại: $e';
     }
+  }
+
+  static Future<String> requestRevealProfile(String chatRoomId) async {
+    final user = _auth.currentUser;
+
+    if (user == null) {
+      return 'Bạn chưa đăng nhập.';
+    }
+
+    try {
+      final chatRoomRef = _chatRoomsRef.doc(chatRoomId);
+      final chatRoomDoc = await chatRoomRef.get();
+
+      if (!chatRoomDoc.exists) {
+        return 'Phòng chat không tồn tại.';
+      }
+
+      final data = chatRoomDoc.data() ?? {};
+
+      final type = data['type']?.toString() ?? 'normal';
+
+      if (type != 'blind') {
+        return 'Chỉ blind chat mới cần reveal.';
+      }
+
+      final userIds = (data['userIds'] as List? ?? [])
+          .map((item) => item.toString())
+          .toList();
+
+      if (!userIds.contains(user.uid)) {
+        return 'Bạn không thuộc phòng chat này.';
+      }
+
+      if (data['isRevealed'] == true) {
+        return 'Hai bạn đã reveal profile rồi.';
+      }
+
+      final revealRequests = (data['revealRequests'] as List? ?? [])
+          .map((item) => item.toString())
+          .toList();
+
+      if (revealRequests.contains(user.uid)) {
+        return 'Bạn đã gửi yêu cầu reveal rồi. Chờ người kia đồng ý.';
+      }
+
+      String otherUserId = '';
+
+      for (final id in userIds) {
+        if (id != user.uid) {
+          otherUserId = id;
+          break;
+        }
+      }
+
+      final newRevealRequests = {...revealRequests, user.uid}.toList();
+
+      final shouldReveal = userIds.every(newRevealRequests.contains);
+
+      final now = Timestamp.fromDate(DateTime.now());
+      final batch = _db.batch();
+
+      batch.update(chatRoomRef, {
+        'revealRequests': FieldValue.arrayUnion([user.uid]),
+        'isRevealed': shouldReveal,
+        'updatedAt': now,
+      });
+
+      final messageRef = chatRoomRef.collection('messages').doc();
+
+      if (shouldReveal) {
+        batch.set(messageRef, {
+          'id': messageRef.id,
+          'chatRoomId': chatRoomId,
+          'senderId': 'system',
+          'text': 'Hai bạn đã đồng ý reveal profile 🎉',
+          'createdAt': now,
+        });
+
+        batch.update(chatRoomRef, {
+          'lastMessage': 'Hai bạn đã đồng ý reveal profile 🎉',
+          'lastMessageSenderId': 'system',
+          'updatedAt': now,
+        });
+      } else {
+        batch.set(messageRef, {
+          'id': messageRef.id,
+          'chatRoomId': chatRoomId,
+          'senderId': 'system',
+          'targetUserId': otherUserId,
+          'text':
+              'Người kia muốn reveal profile 👀 Bấm Reveal nếu bạn cũng đồng ý.',
+          'createdAt': now,
+        });
+
+        batch.update(chatRoomRef, {
+          'lastMessage': 'Có yêu cầu reveal profile 👀',
+          'lastMessageSenderId': 'system',
+          'updatedAt': now,
+        });
+      }
+
+      await batch.commit();
+
+      if (shouldReveal) {
+        return 'Reveal thành công! Hai bạn đã thấy profile thật.';
+      }
+
+      return 'Đã gửi yêu cầu reveal. Chờ người kia đồng ý.';
+    } on FirebaseException catch (e) {
+      if (e.code == 'permission-denied') {
+        return 'Không có quyền reveal. Kiểm tra Firestore Rules.';
+      }
+
+      return 'Reveal thất bại: ${e.message ?? e.code}';
+    } catch (e) {
+      return 'Reveal thất bại: $e';
+    }
+  }
+
+  static bool hasRequestedReveal(FirestoreChatRoom room) {
+    final user = _auth.currentUser;
+
+    if (user == null) return false;
+
+    return room.revealRequests.contains(user.uid);
+  }
+
+  static bool otherUserRequestedReveal(FirestoreChatRoom room) {
+    final user = _auth.currentUser;
+
+    if (user == null) return false;
+
+    return room.revealRequests.any((uid) => uid != user.uid);
   }
 }
