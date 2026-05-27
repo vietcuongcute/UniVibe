@@ -2,640 +2,318 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import '../data/mock_users.dart';
-import '../models/blind_chat.dart';
-import '../models/chat_message.dart';
-import '../models/user_profile.dart';
-import '../services/blind_chat_service.dart';
+import '../services/blind_chat_match_service.dart';
+import 'chat_detail_screen.dart';
 
 class BlindChatScreen extends StatefulWidget {
-  final UserProfile? otherUser;
-
-  const BlindChatScreen({super.key, this.otherUser});
+  const BlindChatScreen({super.key});
 
   @override
   State<BlindChatScreen> createState() => _BlindChatScreenState();
 }
 
 class _BlindChatScreenState extends State<BlindChatScreen> {
-  final TextEditingController _messageController = TextEditingController();
-  Timer? _timer;
-  Duration _timeLeft = const Duration(minutes: 10);
-
-  @override
-  void initState() {
-    super.initState();
-
-    final selectedUser = widget.otherUser ?? mockUsers.first;
-
-    if (BlindChatService.activeBlindChatNotifier.value == null) {
-      BlindChatService.createBlindChat(
-        currentUser: currentUser,
-        otherUser: selectedUser,
-      );
-    }
-
-    _updateTimeLeft();
-
-    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      _updateTimeLeft();
-      BlindChatService.expireChatIfNeeded();
-    });
-  }
+  bool _isFinding = false;
+  bool _isWaiting = false;
+  String _statusText = 'Sẵn sàng bóc túi mù?';
+  Timer? _pollTimer;
 
   @override
   void dispose() {
-    _messageController.dispose();
-    _timer?.cancel();
+    _pollTimer?.cancel();
     super.dispose();
   }
 
-  void _updateTimeLeft() {
-    final chat = BlindChatService.activeBlindChatNotifier.value;
+  Future<void> _findBlindChat() async {
+    if (_isFinding) return;
 
-    if (chat == null) {
+    setState(() {
+      _isFinding = true;
+      _statusText = 'Đang tìm người phù hợp...';
+    });
+
+    final result = await BlindChatMatchService.findOrWait();
+
+    if (!mounted) return;
+
+    if (result.success && result.chatRoomId != null) {
+      setState(() {
+        _isFinding = false;
+        _isWaiting = false;
+        _statusText = result.message;
+      });
+
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ChatDetailScreen(chatRoomId: result.chatRoomId!),
+        ),
+      );
       return;
     }
 
-    final difference = chat.expiresAt.difference(DateTime.now());
+    if (result.success && result.waiting) {
+      setState(() {
+        _isFinding = false;
+        _isWaiting = true;
+        _statusText = result.message;
+      });
+
+      _startPolling();
+      return;
+    }
 
     setState(() {
-      if (difference.isNegative) {
-        _timeLeft = Duration.zero;
-      } else {
-        _timeLeft = difference;
+      _isFinding = false;
+      _isWaiting = false;
+      _statusText = result.message;
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(result.message),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  void _startPolling() {
+    _pollTimer?.cancel();
+
+    _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) async {
+      final result = await BlindChatMatchService.findOrWait();
+
+      if (!mounted) return;
+
+      if (result.success && result.chatRoomId != null) {
+        _pollTimer?.cancel();
+
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ChatDetailScreen(chatRoomId: result.chatRoomId!),
+          ),
+        );
       }
     });
   }
 
-  void _sendMessage() {
-    final text = _messageController.text.trim();
+  Future<void> _cancelWaiting() async {
+    _pollTimer?.cancel();
 
-    if (text.isEmpty) {
-      return;
-    }
+    final result = await BlindChatMatchService.cancelWaiting();
 
-    BlindChatService.sendMessage(text);
-    _messageController.clear();
+    if (!mounted) return;
 
-    Future.delayed(const Duration(milliseconds: 600), () {
-      BlindChatService.sendMockReply();
+    setState(() {
+      _isFinding = false;
+      _isWaiting = false;
+      _statusText = 'Sẵn sàng bóc túi mù?';
     });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(result), behavior: SnackBarBehavior.floating),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<BlindChat?>(
-      valueListenable: BlindChatService.activeBlindChatNotifier,
-      builder: (context, chat, child) {
-        if (chat == null) {
-          return Scaffold(
-            backgroundColor: const Color(0xFFF7F3FF),
-            body: SafeArea(
-              child: Column(
-                children: [
-                  _buildEmptyHeader(context),
-                  const Expanded(
-                    child: Center(
-                      child: Text(
-                        'Chưa có blind chat nào.',
-                        style: TextStyle(fontSize: 16, color: Colors.black54),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        }
-
-        return Scaffold(
-          backgroundColor: const Color(0xFFF7F3FF),
-          body: SafeArea(
-            child: Column(
-              children: [
-                _buildHeader(context, chat),
-                _buildInfoBanner(chat),
-                Expanded(
-                  child: ListView.builder(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
-                    itemCount: chat.messages.length,
-                    itemBuilder: (context, index) {
-                      final message = chat.messages[index];
-
-                      return _buildMessageBubble(
-                        message: message,
-                        currentUserId: chat.currentUser.id,
-                      );
-                    },
-                  ),
-                ),
-                _buildRevealSection(chat),
-                _buildMessageInput(chat),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildEmptyHeader(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(18, 16, 18, 24),
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          colors: [Color(0xFF8E2DE2), Color(0xFF4A00E0)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
+    return Scaffold(
+      backgroundColor: const Color(0xFFF7F3FF),
+      appBar: AppBar(
+        title: const Text(
+          'Blind Chat',
+          style: TextStyle(fontWeight: FontWeight.bold),
         ),
-        borderRadius: BorderRadius.only(
-          bottomLeft: Radius.circular(28),
-          bottomRight: Radius.circular(28),
-        ),
+        centerTitle: true,
+        backgroundColor: Colors.white,
+        foregroundColor: const Color(0xFF2D1B69),
+        elevation: 0,
       ),
-      child: Row(
-        children: [
-          InkWell(
-            borderRadius: BorderRadius.circular(100),
-            onTap: () {
-              Navigator.pop(context);
-            },
-            child: Container(
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.18),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.arrow_back_ios_new_rounded,
-                color: Colors.white,
-                size: 18,
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          const Expanded(
-            child: Text(
-              'Blind Chat',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildHeader(BuildContext context, BlindChat chat) {
-    final String title = _buildTitle(chat);
-    final bool revealed = chat.status == 'revealed';
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(18, 16, 18, 22),
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          colors: [Color(0xFF8E2DE2), Color(0xFF4A00E0)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.only(
-          bottomLeft: Radius.circular(28),
-          bottomRight: Radius.circular(28),
-        ),
-      ),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              InkWell(
-                borderRadius: BorderRadius.circular(100),
-                onTap: () {
-                  Navigator.pop(context);
-                },
-                child: Container(
-                  width: 42,
-                  height: 42,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.18),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    Icons.arrow_back_ios_new_rounded,
-                    color: Colors.white,
-                    size: 18,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  title,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              InkWell(
-                borderRadius: BorderRadius.circular(100),
-                onTap: () {
-                  BlindChatService.endChat();
-                  Navigator.pop(context);
-                },
-                child: Container(
-                  width: 42,
-                  height: 42,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.18),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(Icons.close_rounded, color: Colors.white),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 22),
-          Row(
-            children: [
-              Container(
-                width: 58,
-                height: 58,
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.25),
-                  ),
-                ),
-                child: Icon(
-                  revealed
-                      ? Icons.person_rounded
-                      : Icons.visibility_off_rounded,
-                  color: Colors.white,
-                  size: 30,
-                ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      revealed ? chat.otherUser.nickname : 'Ẩn danh cùng vibe',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        height: 1.2,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      revealed
-                          ? '${chat.otherUser.major} · ${chat.otherUser.university}'
-                          : 'Chat 10 phút, chỉ reveal khi cả hai đồng ý.',
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 13,
-                        height: 1.35,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  String _buildTitle(BlindChat chat) {
-    if (chat.status == 'revealed') {
-      return chat.otherUser.nickname;
-    }
-
-    if (chat.status == 'expired') {
-      return 'Blind Chat đã hết hạn';
-    }
-
-    return 'Blind Chat';
-  }
-
-  Widget _buildInfoBanner(BlindChat chat) {
-    final minutes = _timeLeft.inMinutes.toString().padLeft(2, '0');
-    final seconds = (_timeLeft.inSeconds % 60).toString().padLeft(2, '0');
-
-    String text;
-    IconData icon;
-    Color color;
-
-    if (chat.status == 'revealed') {
-      text = 'Hai bạn đã đồng ý reveal profile.';
-      icon = Icons.verified_rounded;
-      color = const Color(0xFF4CAF50);
-    } else if (chat.status == 'expired') {
-      text = 'Blind chat đã hết hạn.';
-      icon = Icons.timer_off_rounded;
-      color = const Color(0xFFE53935);
-    } else {
-      text = 'Còn $minutes:$seconds để trò chuyện ẩn danh.';
-      icon = Icons.timer_rounded;
-      color = const Color(0xFFFF9800);
-    }
-
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: color.withValues(alpha: 0.18)),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, color: color, size: 20),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              text,
-              style: TextStyle(
-                color: color,
-                fontWeight: FontWeight.w700,
-                fontSize: 13,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildMessageBubble({
-    required ChatMessage message,
-    required String currentUserId,
-  }) {
-    final isSystem = message.senderId == 'system';
-    final isMe = message.senderId == currentUserId;
-
-    if (isSystem) {
-      return Container(
-        margin: const EdgeInsets.only(bottom: 12),
-        child: Center(
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(100),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.purple.withValues(alpha: 0.06),
-                  blurRadius: 10,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: Text(
-              message.text,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.grey.shade700,
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-
-    return Align(
-      alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 11),
-        constraints: const BoxConstraints(maxWidth: 280),
-        decoration: BoxDecoration(
-          gradient: isMe
-              ? const LinearGradient(
-                  colors: [Color(0xFF8E2DE2), Color(0xFF4A00E0)],
-                )
-              : null,
-          color: isMe ? null : Colors.white,
-          borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(20),
-            topRight: const Radius.circular(20),
-            bottomLeft: Radius.circular(isMe ? 20 : 4),
-            bottomRight: Radius.circular(isMe ? 4 : 20),
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.purple.withValues(alpha: 0.06),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Text(
-          message.text,
-          style: TextStyle(
-            color: isMe ? Colors.white : Colors.black87,
-            fontSize: 15,
-            height: 1.35,
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildRevealSection(BlindChat chat) {
-    if (chat.status == 'expired') {
-      return Padding(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-        child: SizedBox(
-          width: double.infinity,
-          child: OutlinedButton.icon(
-            onPressed: () {
-              BlindChatService.endChat();
-              Navigator.pop(context);
-            },
-            icon: const Icon(Icons.close_rounded),
-            label: const Text('Kết thúc chat'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: const Color(0xFFE53935),
-              side: const BorderSide(color: Color(0xFFE53935)),
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(18),
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-
-    if (chat.status == 'revealed') {
-      return Container(
-        width: double.infinity,
-        margin: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: const Color(0xFF4CAF50).withValues(alpha: 0.12),
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(
-            color: const Color(0xFF4CAF50).withValues(alpha: 0.18),
-          ),
-        ),
-        child: Text(
-          'Profile đã mở: ${chat.otherUser.nickname} · ${chat.otherUser.major} · ${chat.otherUser.university}',
-          textAlign: TextAlign.center,
-          style: const TextStyle(
-            color: Color(0xFF2E7D32),
-            fontWeight: FontWeight.w700,
-            fontSize: 13,
-          ),
-        ),
-      );
-    }
-
-    if (chat.currentUserWantsReveal) {
-      return Container(
-        width: double.infinity,
-        margin: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: const Color(0xFFFF9800).withValues(alpha: 0.12),
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(
-            color: const Color(0xFFFF9800).withValues(alpha: 0.18),
-          ),
-        ),
-        child: Column(
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(18),
           children: [
-            const Text(
-              'Bạn đã yêu cầu reveal profile. Đang chờ người kia đồng ý.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Color(0xFFE65100),
-                fontWeight: FontWeight.w700,
-                fontSize: 13,
-              ),
-            ),
-            const SizedBox(height: 10),
-            OutlinedButton.icon(
-              onPressed: () {
-                BlindChatService.mockOtherUserAcceptReveal();
-              },
-              icon: const Icon(Icons.person_add_alt_1_rounded),
-              label: const Text('Giả lập người kia đồng ý'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: const Color(0xFFFF9800),
-                side: const BorderSide(color: Color(0xFFFF9800)),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-              ),
-            ),
+            _buildHeroCard(),
+            const SizedBox(height: 18),
+            _buildStatusCard(),
+            const SizedBox(height: 18),
+            _buildActionButton(),
+            const SizedBox(height: 14),
+            if (_isWaiting) _buildCancelButton(),
+            const SizedBox(height: 24),
+            _buildRulesCard(),
           ],
-        ),
-      );
-    }
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-      child: SizedBox(
-        width: double.infinity,
-        child: OutlinedButton.icon(
-          onPressed: () {
-            BlindChatService.requestReveal();
-
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Đã gửi yêu cầu reveal profile.'),
-                behavior: SnackBarBehavior.floating,
-              ),
-            );
-          },
-          icon: const Icon(Icons.visibility_rounded),
-          label: const Text('Reveal profile nếu cả hai đồng ý'),
-          style: OutlinedButton.styleFrom(
-            foregroundColor: const Color(0xFF7B61FF),
-            side: const BorderSide(color: Color(0xFF7B61FF), width: 1.4),
-            padding: const EdgeInsets.symmetric(vertical: 14),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(18),
-            ),
-          ),
         ),
       ),
     );
   }
 
-  Widget _buildMessageInput(BlindChat chat) {
-    if (chat.status == 'expired') {
-      return const SizedBox.shrink();
-    }
-
+  Widget _buildHeroCard() {
     return Container(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+      width: double.infinity,
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFFE91E63), Color(0xFF8E2DE2)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(28),
+      ),
+      child: const Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.visibility_off_rounded, color: Colors.white, size: 48),
+          SizedBox(height: 18),
+          Text(
+            'Bóc túi mù UniVibe',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 26,
+              fontWeight: FontWeight.bold,
+              height: 1.15,
+            ),
+          ),
+          SizedBox(height: 8),
+          Text(
+            'Ghép ngẫu nhiên với một sinh viên trong trường. Chat trước, reveal sau.',
+            style: TextStyle(color: Colors.white70, fontSize: 14, height: 1.4),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatusCard() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
         boxShadow: [
           BoxShadow(
-            color: Colors.purple.withValues(alpha: 0.08),
-            blurRadius: 16,
-            offset: const Offset(0, -4),
+            color: Colors.purple.withOpacity(0.06),
+            blurRadius: 14,
+            offset: const Offset(0, 7),
           ),
         ],
       ),
       child: Row(
         children: [
+          Container(
+            width: 52,
+            height: 52,
+            decoration: BoxDecoration(
+              color: const Color(0xFFE91E63).withOpacity(0.12),
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: _isFinding || _isWaiting
+                ? const Padding(
+                    padding: EdgeInsets.all(14),
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.5,
+                      color: Color(0xFFE91E63),
+                    ),
+                  )
+                : const Icon(
+                    Icons.auto_awesome_rounded,
+                    color: Color(0xFFE91E63),
+                    size: 28,
+                  ),
+          ),
+          const SizedBox(width: 14),
           Expanded(
-            child: TextField(
-              controller: _messageController,
-              decoration: InputDecoration(
-                hintText: 'Nhập tin nhắn...',
-                filled: true,
-                fillColor: const Color(0xFFF7F3FF),
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 13,
-                ),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(18),
-                  borderSide: BorderSide.none,
-                ),
+            child: Text(
+              _statusText,
+              style: const TextStyle(
+                fontSize: 16,
+                height: 1.35,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF2D1B69),
               ),
-              onSubmitted: (_) {
-                _sendMessage();
-              },
             ),
           ),
-          const SizedBox(width: 8),
-          InkWell(
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActionButton() {
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton.icon(
+        onPressed: _isFinding || _isWaiting ? null : _findBlindChat,
+        icon: const Icon(Icons.shuffle_rounded),
+        label: Text(
+          _isFinding
+              ? 'Đang tìm...'
+              : _isWaiting
+              ? 'Đang chờ...'
+              : 'Tìm Blind Chat',
+        ),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: const Color(0xFFE91E63),
+          foregroundColor: Colors.white,
+          disabledBackgroundColor: Colors.grey.shade300,
+          disabledForegroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(vertical: 15),
+          shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(18),
-            onTap: _sendMessage,
-            child: Container(
-              width: 48,
-              height: 48,
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0xFF8E2DE2), Color(0xFF4A00E0)],
-                ),
-                borderRadius: BorderRadius.circular(18),
-              ),
-              child: const Icon(Icons.send_rounded, color: Colors.white),
+          ),
+          textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCancelButton() {
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        onPressed: _cancelWaiting,
+        icon: const Icon(Icons.close_rounded),
+        label: const Text('Huỷ chờ'),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: const Color(0xFFE91E63),
+          side: const BorderSide(color: Color(0xFFE91E63)),
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRulesCard() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
+      ),
+      child: const Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Luật chơi bản dev',
+            style: TextStyle(
+              fontSize: 17,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF2D1B69),
             ),
+          ),
+          SizedBox(height: 12),
+          Text(
+            '• Cần 2 account khác nhau để ghép blind chat.\n'
+            '• Account đầu bấm tìm sẽ vào hàng chờ.\n'
+            '• Account thứ hai bấm tìm sẽ tạo phòng chat.\n'
+            '• Tin nhắn dùng chung hệ thống chat realtime hiện tại.\n'
+            '• Reveal profile sẽ làm ở bước sau.',
+            style: TextStyle(color: Colors.black54, height: 1.45),
           ),
         ],
       ),

@@ -1,8 +1,8 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'chat_detail_screen.dart';
 
 import '../services/chat_service.dart';
+import 'chat_detail_screen.dart';
 
 class ChatTab extends StatelessWidget {
   const ChatTab({super.key});
@@ -41,17 +41,108 @@ class ChatTab extends StatelessWidget {
             separatorBuilder: (_, __) => const SizedBox(height: 12),
             itemBuilder: (context, index) {
               final room = chatRooms[index];
-              return InkWell(
-                borderRadius: BorderRadius.circular(22),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => ChatDetailScreen(chatRoomId: room.id),
+
+              return Dismissible(
+                key: ValueKey(room.id),
+                direction: DismissDirection.endToStart,
+                background: Container(
+                  alignment: Alignment.centerRight,
+                  padding: const EdgeInsets.only(right: 22),
+                  decoration: BoxDecoration(
+                    color: Colors.redAccent,
+                    borderRadius: BorderRadius.circular(22),
+                  ),
+                  child: const Icon(
+                    Icons.delete_outline_rounded,
+                    color: Colors.white,
+                  ),
+                ),
+                confirmDismiss: (_) async {
+                  return await showDialog<bool>(
+                        context: context,
+                        builder: (dialogContext) {
+                          return AlertDialog(
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(22),
+                            ),
+                            title: const Text(
+                              'Xoá đoạn chat?',
+                              style: TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                            content: const Text(
+                              'Đoạn chat chỉ bị xoá khỏi danh sách của bạn. Người kia vẫn thấy bình thường.',
+                              style: TextStyle(
+                                color: Colors.black54,
+                                height: 1.4,
+                              ),
+                            ),
+                            actions: [
+                              TextButton(
+                                onPressed: () {
+                                  Navigator.pop(dialogContext, false);
+                                },
+                                child: const Text('Huỷ'),
+                              ),
+                              ElevatedButton.icon(
+                                onPressed: () {
+                                  Navigator.pop(dialogContext, true);
+                                },
+                                icon: const Icon(Icons.delete_outline_rounded),
+                                label: const Text('Xoá'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.redAccent,
+                                  foregroundColor: Colors.white,
+                                ),
+                              ),
+                            ],
+                          );
+                        },
+                      ) ??
+                      false;
+                },
+                onDismissed: (_) async {
+                  final messenger = ScaffoldMessenger.of(context);
+
+                  final result = await ChatService.deleteChatRoomForCurrentUser(
+                    room.id,
+                  );
+
+                  messenger.showSnackBar(
+                    SnackBar(
+                      content: Text(result),
+                      behavior: SnackBarBehavior.floating,
+                      action: SnackBarAction(
+                        label: 'Hoàn tác',
+                        textColor: Colors.white,
+                        onPressed: () async {
+                          final restoreResult =
+                              await ChatService.restoreChatRoomForCurrentUser(
+                                room.id,
+                              );
+
+                          messenger.showSnackBar(
+                            SnackBar(
+                              content: Text(restoreResult),
+                              behavior: SnackBarBehavior.floating,
+                            ),
+                          );
+                        },
+                      ),
                     ),
                   );
                 },
-                child: _buildChatRoomCard(room),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(22),
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => ChatDetailScreen(chatRoomId: room.id),
+                      ),
+                    );
+                  },
+                  child: _buildChatRoomCard(room),
+                ),
               );
             },
           ),

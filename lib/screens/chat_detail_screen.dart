@@ -15,9 +15,12 @@ class ChatDetailScreen extends StatefulWidget {
 class _ChatDetailScreenState extends State<ChatDetailScreen> {
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+
   bool _isSending = false;
 
-  String get _currentUserId => FirebaseAuth.instance.currentUser?.uid ?? '';
+  String get _currentUserId {
+    return FirebaseAuth.instance.currentUser?.uid ?? '';
+  }
 
   @override
   void dispose() {
@@ -40,7 +43,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
       _messageController.clear();
 
-      await Future.delayed(const Duration(milliseconds: 120));
+      await Future.delayed(const Duration(milliseconds: 150));
 
       if (_scrollController.hasClients) {
         _scrollController.animateTo(
@@ -67,6 +70,12 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     }
   }
 
+  String _formatTime(DateTime time) {
+    final hour = time.hour.toString().padLeft(2, '0');
+    final minute = time.minute.toString().padLeft(2, '0');
+    return '$hour:$minute';
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_currentUserId.isEmpty) {
@@ -80,7 +89,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       stream: ChatService.chatRoomStream(widget.chatRoomId),
       builder: (context, roomSnapshot) {
         final room = roomSnapshot.data;
-        final title = room?.otherName.isNotEmpty == true
+
+        final displayName = room?.otherName.isNotEmpty == true
             ? room!.otherName
             : 'Chat UniVibe';
 
@@ -89,19 +99,19 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           appBar: AppBar(
             elevation: 0,
             backgroundColor: Colors.white,
-            foregroundColor: Colors.black87,
+            foregroundColor: const Color(0xFF2D1B69),
             titleSpacing: 0,
             title: Row(
               children: [
                 CircleAvatar(
-                  radius: 18,
+                  radius: 19,
                   backgroundColor: const Color(0xFFEDE7FF),
                   backgroundImage: room?.otherAvatarUrl.isNotEmpty == true
                       ? NetworkImage(room!.otherAvatarUrl)
                       : null,
                   child: room == null || room.otherAvatarUrl.isEmpty
                       ? Text(
-                          title[0].toUpperCase(),
+                          displayName[0].toUpperCase(),
                           style: const TextStyle(
                             color: Color(0xFF7B61FF),
                             fontWeight: FontWeight.bold,
@@ -112,9 +122,12 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    title,
+                    displayName,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontWeight: FontWeight.bold),
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 17,
+                    ),
                   ),
                 ),
               ],
@@ -138,6 +151,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                           child: Text(
                             'Không tải được tin nhắn:\n${messageSnapshot.error}',
                             textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: Colors.black54,
+                              height: 1.4,
+                            ),
                           ),
                         ),
                       );
@@ -169,6 +186,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                       itemCount: messages.length,
                       itemBuilder: (context, index) {
                         final message = messages[index];
+
                         final isMe = message.senderId == _currentUserId;
                         final isSystem = message.senderId == 'system';
 
@@ -202,42 +220,63 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                           alignment: isMe
                               ? Alignment.centerRight
                               : Alignment.centerLeft,
-                          child: Container(
-                            margin: const EdgeInsets.only(bottom: 10),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 14,
-                              vertical: 10,
-                            ),
-                            constraints: BoxConstraints(
-                              maxWidth:
-                                  MediaQuery.of(context).size.width * 0.72,
-                            ),
-                            decoration: BoxDecoration(
-                              color: isMe
-                                  ? const Color(0xFF7B61FF)
-                                  : Colors.white,
-                              borderRadius: BorderRadius.only(
-                                topLeft: const Radius.circular(18),
-                                topRight: const Radius.circular(18),
-                                bottomLeft: Radius.circular(isMe ? 18 : 4),
-                                bottomRight: Radius.circular(isMe ? 4 : 18),
-                              ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withOpacity(0.04),
-                                  blurRadius: 10,
-                                  offset: const Offset(0, 4),
+                          child: Column(
+                            crossAxisAlignment: isMe
+                                ? CrossAxisAlignment.end
+                                : CrossAxisAlignment.start,
+                            children: [
+                              Container(
+                                margin: const EdgeInsets.only(bottom: 4),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                  vertical: 10,
                                 ),
-                              ],
-                            ),
-                            child: Text(
-                              message.text,
-                              style: TextStyle(
-                                color: isMe ? Colors.white : Colors.black87,
-                                fontSize: 15,
-                                height: 1.35,
+                                constraints: BoxConstraints(
+                                  maxWidth:
+                                      MediaQuery.of(context).size.width * 0.74,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: isMe
+                                      ? const Color(0xFF7B61FF)
+                                      : Colors.white,
+                                  borderRadius: BorderRadius.only(
+                                    topLeft: const Radius.circular(18),
+                                    topRight: const Radius.circular(18),
+                                    bottomLeft: Radius.circular(isMe ? 18 : 4),
+                                    bottomRight: Radius.circular(isMe ? 4 : 18),
+                                  ),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(0.04),
+                                      blurRadius: 10,
+                                      offset: const Offset(0, 4),
+                                    ),
+                                  ],
+                                ),
+                                child: Text(
+                                  message.text,
+                                  style: TextStyle(
+                                    color: isMe ? Colors.white : Colors.black87,
+                                    fontSize: 15,
+                                    height: 1.35,
+                                  ),
+                                ),
                               ),
-                            ),
+                              Padding(
+                                padding: const EdgeInsets.only(
+                                  left: 4,
+                                  right: 4,
+                                  bottom: 10,
+                                ),
+                                child: Text(
+                                  _formatTime(message.createdAt),
+                                  style: const TextStyle(
+                                    color: Colors.black38,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         );
                       },
