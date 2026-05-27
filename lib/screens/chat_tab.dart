@@ -1,5 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'chat_detail_screen.dart';
 
 import '../services/chat_service.dart';
 
@@ -40,7 +41,18 @@ class ChatTab extends StatelessWidget {
             separatorBuilder: (_, __) => const SizedBox(height: 12),
             itemBuilder: (context, index) {
               final room = chatRooms[index];
-              return _buildChatRoomCard(room);
+              return InkWell(
+                borderRadius: BorderRadius.circular(22),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => ChatDetailScreen(chatRoomId: room.id),
+                    ),
+                  );
+                },
+                child: _buildChatRoomCard(room),
+              );
             },
           ),
         );
