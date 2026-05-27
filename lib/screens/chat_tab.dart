@@ -265,9 +265,23 @@ class ChatTab extends StatelessWidget {
   }
 
   Widget _buildChatRoomCard(FirestoreChatRoom room) {
-    final displayName = room.otherName.isNotEmpty
+    final isBlindHidden = room.type == 'blind' && !room.isRevealed;
+
+    final displayName = isBlindHidden
+        ? 'Ẩn danh UniVibe'
+        : room.otherName.isNotEmpty
         ? room.otherName
         : 'Người dùng UniVibe';
+
+    final displayLastMessage = room.lastMessage.isNotEmpty
+        ? room.lastMessage
+        : isBlindHidden
+        ? 'Blind chat đang ẩn danh'
+        : 'Bắt đầu trò chuyện';
+
+    final avatarLetter = displayName.isNotEmpty
+        ? displayName[0].toUpperCase()
+        : 'U';
 
     return Container(
       padding: const EdgeInsets.all(14),
@@ -287,12 +301,18 @@ class ChatTab extends StatelessWidget {
           CircleAvatar(
             radius: 26,
             backgroundColor: const Color(0xFFEDE7FF),
-            backgroundImage: room.otherAvatarUrl.isNotEmpty
+            backgroundImage: !isBlindHidden && room.otherAvatarUrl.isNotEmpty
                 ? NetworkImage(room.otherAvatarUrl)
                 : null,
-            child: room.otherAvatarUrl.isEmpty
+            child: isBlindHidden
+                ? const Icon(
+                    Icons.visibility_off_rounded,
+                    color: Color(0xFF7B61FF),
+                    size: 24,
+                  )
+                : room.otherAvatarUrl.isEmpty
                 ? Text(
-                    displayName[0].toUpperCase(),
+                    avatarLetter,
                     style: const TextStyle(
                       color: Color(0xFF7B61FF),
                       fontWeight: FontWeight.bold,
@@ -315,9 +335,7 @@ class ChatTab extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  room.lastMessage.isNotEmpty
-                      ? room.lastMessage
-                      : 'Bắt đầu trò chuyện',
+                  displayLastMessage,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(color: Colors.black54, fontSize: 13),

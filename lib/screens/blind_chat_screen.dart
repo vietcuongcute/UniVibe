@@ -327,7 +327,7 @@ class _BlindChatScreenState extends State<BlindChatScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Luật chơi bản dev',
+            'Luật chơi',
             style: TextStyle(
               fontSize: 17,
               fontWeight: FontWeight.bold,
