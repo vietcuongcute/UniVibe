@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'auth_gate.dart';
+import '../services/chat_service.dart';
 
 import 'vibe_tab.dart';
 import 'confession_tab.dart';
@@ -34,18 +36,27 @@ class _HomeScreenState extends State<HomeScreen> {
   ];
 
   Future<void> _logout() async {
-    final messenger = ScaffoldMessenger.of(context);
+    try {
+      ChatService.chatRoomsNotifier.value = [];
 
-    await FirebaseAuth.instance.signOut();
+      await FirebaseAuth.instance.signOut();
 
-    if (!mounted) return;
+      if (!mounted) return;
 
-    messenger.showSnackBar(
-      const SnackBar(
-        content: Text('Đã đăng xuất.'),
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const AuthGate()),
+        (route) => false,
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Đăng xuất thất bại: $e'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   void _showLogoutConfirmDialog() {

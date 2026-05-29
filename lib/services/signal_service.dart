@@ -279,7 +279,7 @@ class SignalService {
         batch.set(welcomeMessageRef, {
           'id': welcomeMessageRef.id,
           'chatRoomId': chatRoomId,
-          'senderId': 'system',
+          'senderId': currentUser.id,
           'text':
               'Hai bạn đã mutual signal 🎉 Bây giờ có thể trò chuyện với nhau rồi!',
           'createdAt': Timestamp.fromDate(now),

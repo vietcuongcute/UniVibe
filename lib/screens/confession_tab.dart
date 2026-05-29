@@ -17,7 +17,6 @@ class _ConfessionTabState extends State<ConfessionTab> {
     'tìm đồ',
     'teammate',
     'học tập',
-    'CLB tuyển người',
     'cảnh báo',
   ];
 
