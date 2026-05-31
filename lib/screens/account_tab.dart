@@ -100,6 +100,16 @@ class _AccountTabState extends State<AccountTab> {
     final majorController = TextEditingController(text: profile.major);
     final bioController = TextEditingController(text: profile.bio);
 
+    final interestsController = TextEditingController(
+      text: profile.interests.join(', '),
+    );
+    final goalsController = TextEditingController(
+      text: profile.goals.join(', '),
+    );
+    final vibeTagsController = TextEditingController(
+      text: profile.vibeTags.join(', '),
+    );
+
     int selectedYear = profile.year;
     String selectedGender = profile.gender.isEmpty
         ? 'Không muốn nói'
@@ -109,6 +119,15 @@ class _AccountTabState extends State<AccountTab> {
 
     if (!genderOptions.contains(selectedGender)) {
       selectedGender = 'Không muốn nói';
+    }
+
+    List<String> parseList(String text) {
+      return text
+          .split(',')
+          .map((item) => item.trim())
+          .where((item) => item.isNotEmpty)
+          .toSet()
+          .toList();
     }
 
     showDialog(
@@ -123,6 +142,10 @@ class _AccountTabState extends State<AccountTab> {
               final university = universityController.text.trim();
               final major = majorController.text.trim();
               final bio = bioController.text.trim();
+
+              final interests = parseList(interestsController.text);
+              final goals = parseList(goalsController.text);
+              final vibeTags = parseList(vibeTagsController.text);
 
               if (nickname.isEmpty || university.isEmpty || major.isEmpty) {
                 _showMessage('Vui lòng nhập nickname, trường và ngành học');
@@ -140,6 +163,9 @@ class _AccountTabState extends State<AccountTab> {
                     'year': selectedYear,
                     'gender': selectedGender,
                     'bio': bio,
+                    'interests': interests,
+                    'goals': goals,
+                    'vibeTags': vibeTags,
                   },
                 );
 
@@ -160,8 +186,8 @@ class _AccountTabState extends State<AccountTab> {
             return AlertDialog(
               backgroundColor: Colors.white,
               insetPadding: const EdgeInsets.symmetric(
-                horizontal: 18,
-                vertical: 24,
+                horizontal: 14,
+                vertical: 20,
               ),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(24),
@@ -170,84 +196,158 @@ class _AccountTabState extends State<AccountTab> {
                 'Chỉnh sửa hồ sơ',
                 style: TextStyle(fontWeight: FontWeight.bold),
               ),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _buildDialogTextField(
-                      controller: nicknameController,
-                      label: 'Nickname',
-                      icon: Icons.badge_rounded,
-                    ),
-                    const SizedBox(height: 12),
-                    _buildDialogTextField(
-                      controller: universityController,
-                      label: 'Trường',
-                      icon: Icons.school_rounded,
-                    ),
-                    const SizedBox(height: 12),
-                    _buildDialogTextField(
-                      controller: majorController,
-                      label: 'Ngành học',
-                      icon: Icons.menu_book_rounded,
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: DropdownButtonFormField<int>(
-                            value: selectedYear,
-                            decoration: _dialogInputDecoration(
-                              label: 'Năm học',
-                              icon: Icons.calendar_month_rounded,
+              content: SizedBox(
+                width: 520,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _buildDialogTextField(
+                        controller: nicknameController,
+                        label: 'Nickname',
+                        icon: Icons.badge_rounded,
+                      ),
+                      const SizedBox(height: 12),
+
+                      _buildDialogTextField(
+                        controller: universityController,
+                        label: 'Trường',
+                        icon: Icons.school_rounded,
+                      ),
+                      const SizedBox(height: 12),
+
+                      _buildDialogTextField(
+                        controller: majorController,
+                        label: 'Ngành học',
+                        icon: Icons.menu_book_rounded,
+                      ),
+                      const SizedBox(height: 12),
+
+                      Row(
+                        children: [
+                          Expanded(
+                            child: DropdownButtonFormField<int>(
+                              value: selectedYear,
+                              decoration: _dialogInputDecoration(
+                                label: 'Năm học',
+                                icon: Icons.calendar_month_rounded,
+                              ),
+                              items: const [
+                                DropdownMenuItem(
+                                  value: 1,
+                                  child: Text('Năm 1'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 2,
+                                  child: Text('Năm 2'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 3,
+                                  child: Text('Năm 3'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 4,
+                                  child: Text('Năm 4'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 5,
+                                  child: Text('Năm 5+'),
+                                ),
+                              ],
+                              onChanged: (value) {
+                                if (value == null) return;
+                                setDialogState(() {
+                                  selectedYear = value;
+                                });
+                              },
                             ),
-                            items: const [
-                              DropdownMenuItem(value: 1, child: Text('Năm 1')),
-                              DropdownMenuItem(value: 2, child: Text('Năm 2')),
-                              DropdownMenuItem(value: 3, child: Text('Năm 3')),
-                              DropdownMenuItem(value: 4, child: Text('Năm 4')),
-                              DropdownMenuItem(value: 5, child: Text('Năm 5+')),
-                            ],
-                            onChanged: (value) {
-                              if (value == null) return;
-                              setDialogState(() {
-                                selectedYear = value;
-                              });
-                            },
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: DropdownButtonFormField<String>(
+                              value: selectedGender,
+                              decoration: _dialogInputDecoration(
+                                label: 'Giới tính',
+                                icon: Icons.person_rounded,
+                              ),
+                              items: genderOptions.map((gender) {
+                                return DropdownMenuItem(
+                                  value: gender,
+                                  child: Text(gender),
+                                );
+                              }).toList(),
+                              onChanged: (value) {
+                                if (value == null) return;
+                                setDialogState(() {
+                                  selectedGender = value;
+                                });
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+
+                      _buildDialogTextField(
+                        controller: bioController,
+                        label: 'Bio',
+                        icon: Icons.edit_rounded,
+                        maxLines: 3,
+                      ),
+
+                      const SizedBox(height: 18),
+                      _buildDialogSectionTitle(
+                        icon: Icons.interests_rounded,
+                        title: 'Sở thích',
+                      ),
+                      const SizedBox(height: 8),
+                      _buildDialogTextField(
+                        controller: interestsController,
+                        label: 'Ví dụ: game, cà phê, học nhóm',
+                        icon: Icons.favorite_rounded,
+                        maxLines: 2,
+                      ),
+
+                      const SizedBox(height: 14),
+                      _buildDialogSectionTitle(
+                        icon: Icons.flag_rounded,
+                        title: 'Mục tiêu',
+                      ),
+                      const SizedBox(height: 8),
+                      _buildDialogTextField(
+                        controller: goalsController,
+                        label: 'Ví dụ: tìm bạn học, đi chơi, tìm người yêu',
+                        icon: Icons.rocket_launch_rounded,
+                        maxLines: 2,
+                      ),
+
+                      const SizedBox(height: 14),
+                      _buildDialogSectionTitle(
+                        icon: Icons.auto_awesome_rounded,
+                        title: 'Vibe tags',
+                      ),
+                      const SizedBox(height: 8),
+                      _buildDialogTextField(
+                        controller: vibeTagsController,
+                        label: 'Ví dụ: chill, hướng nội, năng động',
+                        icon: Icons.local_fire_department_rounded,
+                        maxLines: 2,
+                      ),
+
+                      const SizedBox(height: 8),
+                      const Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          'Mỗi mục cách nhau bằng dấu phẩy. Ví dụ: game, học bài, cà phê',
+                          style: TextStyle(
+                            color: Colors.black45,
+                            fontSize: 12,
+                            height: 1.35,
                           ),
                         ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: DropdownButtonFormField<String>(
-                            value: selectedGender,
-                            decoration: _dialogInputDecoration(
-                              label: 'Giới tính',
-                              icon: Icons.person_rounded,
-                            ),
-                            items: genderOptions.map((gender) {
-                              return DropdownMenuItem(
-                                value: gender,
-                                child: Text(gender),
-                              );
-                            }).toList(),
-                            onChanged: (value) {
-                              if (value == null) return;
-                              setDialogState(() {
-                                selectedGender = value;
-                              });
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    _buildDialogTextField(
-                      controller: bioController,
-                      label: 'Bio',
-                      icon: Icons.edit_rounded,
-                      maxLines: 3,
-                    ),
-                  ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
               actions: [
