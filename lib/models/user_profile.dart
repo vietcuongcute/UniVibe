@@ -2,6 +2,7 @@ class UserProfile {
   final String id;
   final String nickname;
   final String avatarUrl;
+  final String coverUrl;
   final String university;
   final String major;
   final int year;
@@ -9,20 +10,23 @@ class UserProfile {
   final List<String> interests;
   final List<String> goals;
   final List<String> vibeTags;
+  final List<String> featuredImageUrls;
   final String bio;
 
   UserProfile({
     required this.id,
     required this.nickname,
-    required this.avatarUrl,
+    this.avatarUrl = '',
+    this.coverUrl = '',
     required this.university,
     required this.major,
     required this.year,
-    required this.gender,
-    required this.interests,
-    required this.goals,
-    required this.vibeTags,
-    required this.bio,
+    this.gender = '',
+    this.interests = const [],
+    this.goals = const [],
+    this.vibeTags = const [],
+    this.featuredImageUrls = const [],
+    this.bio = '',
   });
 
   factory UserProfile.fromMap(Map<String, dynamic> map) {
@@ -30,6 +34,7 @@ class UserProfile {
       id: map['id']?.toString() ?? '',
       nickname: map['nickname']?.toString() ?? '',
       avatarUrl: map['avatarUrl']?.toString() ?? '',
+      coverUrl: map['coverUrl']?.toString() ?? '',
       university: map['university']?.toString() ?? '',
       major: map['major']?.toString() ?? '',
       year: _parseYear(map['year']),
@@ -37,6 +42,7 @@ class UserProfile {
       interests: _parseStringList(map['interests']),
       goals: _parseStringList(map['goals']),
       vibeTags: _parseStringList(map['vibeTags']),
+      featuredImageUrls: _parseStringList(map['featuredImageUrls']),
       bio: map['bio']?.toString() ?? '',
     );
   }
@@ -46,6 +52,7 @@ class UserProfile {
       'id': id,
       'nickname': nickname,
       'avatarUrl': avatarUrl,
+      'coverUrl': coverUrl,
       'university': university,
       'major': major,
       'year': year,
@@ -53,6 +60,7 @@ class UserProfile {
       'interests': interests,
       'goals': goals,
       'vibeTags': vibeTags,
+      'featuredImageUrls': featuredImageUrls,
       'bio': bio,
     };
   }

@@ -1,5 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../models/user_profile.dart';
 import '../services/chat_service.dart';
@@ -19,6 +20,7 @@ class _AccountTabState extends State<AccountTab> {
   static const Color _bg = Color(0xFFF7F3FF);
 
   late Future<UserProfile?> _profileFuture;
+  bool _isUploadingImage = false;
 
   @override
   void initState() {
@@ -30,6 +32,39 @@ class _AccountTabState extends State<AccountTab> {
     setState(() {
       _profileFuture = UserProfileService.getCurrentUserProfile();
     });
+  }
+
+  Future<XFile?> _pickImage() async {
+    final picker = ImagePicker();
+
+    return picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 75,
+      maxWidth: 1200,
+    );
+  }
+
+  Future<void> _uploadAvatar() async {
+    _showMessage(
+      'Chức năng upload ảnh sẽ làm sau vì project chưa bật Firebase Storage',
+    );
+  }
+
+  Future<void> _addFeaturedImage() async {
+    _showMessage(
+      'Chức năng thêm ảnh nổi bật sẽ làm sau vì project chưa bật Firebase Storage',
+    );
+  }
+
+  Future<void> _removeFeaturedImage(String imageUrl) async {
+    try {
+      await UserProfileService.removeFeaturedImage(imageUrl);
+
+      _reloadProfile();
+      _showMessage('Đã xoá ảnh nổi bật');
+    } catch (e) {
+      _showMessage('Xoá ảnh thất bại: $e');
+    }
   }
 
   Future<void> _logout() async {
@@ -484,6 +519,8 @@ class _AccountTabState extends State<AccountTab> {
                     items: profile.vibeTags,
                   ),
                   const SizedBox(height: 18),
+                  _buildFeaturedImagesSection(profile),
+                  const SizedBox(height: 18),
                   _buildActionCard(profile),
                 ],
               ),
@@ -519,22 +556,59 @@ class _AccountTabState extends State<AccountTab> {
       ),
       child: Column(
         children: [
-          CircleAvatar(
-            radius: 42,
-            backgroundColor: Colors.white.withOpacity(0.22),
-            backgroundImage: profile.avatarUrl.isNotEmpty
-                ? NetworkImage(profile.avatarUrl)
-                : null,
-            child: profile.avatarUrl.isEmpty
-                ? Text(
-                    firstLetter,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 34,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  )
-                : null,
+          Stack(
+            alignment: Alignment.bottomRight,
+            children: [
+              CircleAvatar(
+                radius: 42,
+                backgroundColor: Colors.white.withOpacity(0.22),
+                backgroundImage: profile.avatarUrl.isNotEmpty
+                    ? NetworkImage(profile.avatarUrl)
+                    : null,
+                child: profile.avatarUrl.isEmpty
+                    ? Text(
+                        firstLetter,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 34,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      )
+                    : null,
+              ),
+              InkWell(
+                onTap: _isUploadingImage ? null : _uploadAvatar,
+                borderRadius: BorderRadius.circular(999),
+                child: Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(999),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.12),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: _isUploadingImage
+                      ? const Padding(
+                          padding: EdgeInsets.all(8),
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: _primary,
+                          ),
+                        )
+                      : const Icon(
+                          Icons.camera_alt_rounded,
+                          color: _primary,
+                          size: 18,
+                        ),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 14),
           Text(
@@ -734,6 +808,116 @@ class _AccountTabState extends State<AccountTab> {
     );
   }
 
+  Widget _buildFeaturedImagesSection(UserProfile profile) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: _cardDecoration(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.photo_library_rounded,
+                color: _primary,
+                size: 22,
+              ),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text(
+                  'Ảnh nổi bật',
+                  style: TextStyle(
+                    color: _darkText,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              TextButton.icon(
+                onPressed: _isUploadingImage ? null : _addFeaturedImage,
+                icon: const Icon(Icons.add_photo_alternate_rounded, size: 18),
+                label: const Text('Thêm'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 13),
+          if (profile.featuredImageUrls.isEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF7F3FF),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: const Text(
+                'Chưa có ảnh nổi bật. Thêm vài ảnh để hồ sơ nhìn xịn hơn.',
+                style: TextStyle(color: Colors.black54, height: 1.35),
+              ),
+            )
+          else
+            GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: profile.featuredImageUrls.length,
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 3,
+                crossAxisSpacing: 8,
+                mainAxisSpacing: 8,
+              ),
+              itemBuilder: (context, index) {
+                final imageUrl = profile.featuredImageUrls[index];
+
+                return Stack(
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(16),
+                      child: Image.network(
+                        imageUrl,
+                        width: double.infinity,
+                        height: double.infinity,
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) {
+                          return Container(
+                            color: const Color(0xFFF1EAFF),
+                            child: const Icon(
+                              Icons.broken_image_rounded,
+                              color: _primary,
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                    Positioned(
+                      top: 5,
+                      right: 5,
+                      child: InkWell(
+                        onTap: () => _removeFeaturedImage(imageUrl),
+                        borderRadius: BorderRadius.circular(999),
+                        child: Container(
+                          width: 26,
+                          height: 26,
+                          decoration: BoxDecoration(
+                            color: Colors.black.withOpacity(0.55),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: const Icon(
+                            Icons.close_rounded,
+                            color: Colors.white,
+                            size: 17,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildActionCard(UserProfile profile) {
     return Container(
       width: double.infinity,
@@ -893,6 +1077,29 @@ class _AccountTabState extends State<AccountTab> {
           offset: const Offset(0, 10),
         ),
       ],
+    );
+  }
+
+  Widget _buildDialogSectionTitle({
+    required IconData icon,
+    required String title,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 14, bottom: 8),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: _primary),
+          const SizedBox(width: 8),
+          Text(
+            title,
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w800,
+              color: Color(0xFF6D4AFF),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

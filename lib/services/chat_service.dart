@@ -37,6 +37,8 @@ class FirestoreChatRoom extends ChatRoom {
          otherUser: UserProfile(
            id: otherUserId,
            nickname: otherName,
+           coverUrl: '',
+           featuredImageUrls: const [],
            avatarUrl: otherAvatarUrl,
            university: otherUniversity,
            major: otherMajor,

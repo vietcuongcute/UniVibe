@@ -788,6 +788,7 @@ class _SignalsScreenState extends State<SignalsScreen> {
       id: userId,
       nickname: fallbackName.isEmpty ? 'Người dùng UniVibe' : fallbackName,
       avatarUrl: '',
+      coverUrl: '',
       university: '',
       major: '',
       year: 1,
@@ -795,6 +796,7 @@ class _SignalsScreenState extends State<SignalsScreen> {
       interests: const [],
       goals: const [],
       vibeTags: const [],
+      featuredImageUrls: const [],
       bio: '',
     );
   }

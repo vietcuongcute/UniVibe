@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../models/user_profile.dart';
 
@@ -8,6 +10,7 @@ class UserProfileService {
 
   static final FirebaseFirestore _db = FirebaseFirestore.instance;
   static final FirebaseAuth _auth = FirebaseAuth.instance;
+  static final FirebaseStorage _storage = FirebaseStorage.instance;
 
   static CollectionReference<Map<String, dynamic>> get _users {
     return _db.collection('users');
@@ -35,6 +38,7 @@ class UserProfileService {
       'email': user.email,
       'nickname': nickname.trim(),
       'avatarUrl': '',
+      'coverUrl': '',
       'university': university.trim(),
       'major': major.trim(),
       'year': year,
@@ -43,6 +47,8 @@ class UserProfileService {
       'interests': interests,
       'goals': goals,
       'vibeTags': vibeTags,
+      'featuredImageUrls': <String>[],
+      'role': 'student',
       'createdAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
     });
@@ -54,7 +60,6 @@ class UserProfileService {
     if (user == null) return false;
 
     final doc = await _users.doc(user.uid).get();
-
     return doc.exists;
   }
 
@@ -68,7 +73,7 @@ class UserProfileService {
 
     if (data == null) return null;
 
-    return UserProfile.fromMap(data);
+    return UserProfile.fromMap({...data, 'id': data['id'] ?? doc.id});
   }
 
   static Future<List<UserProfile>> getAllUsers() async {
@@ -104,6 +109,63 @@ class UserProfileService {
 
     await _users.doc(user.uid).update({
       ...data,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  static Future<String> uploadProfileImage({
+    required XFile image,
+    required String folder,
+  }) async {
+    final user = _auth.currentUser;
+
+    if (user == null) {
+      throw Exception('User chưa đăng nhập');
+    }
+
+    final bytes = await image.readAsBytes();
+    final fileName = '${DateTime.now().millisecondsSinceEpoch}.jpg';
+    final path = 'users/${user.uid}/$folder/$fileName';
+
+    final ref = _storage.ref().child(path);
+
+    final uploadTask = await ref.putData(
+      bytes,
+      SettableMetadata(
+        contentType: 'image/jpeg',
+        customMetadata: {'uid': user.uid, 'folder': folder},
+      ),
+    );
+
+    return uploadTask.ref.getDownloadURL();
+  }
+
+  static Future<void> updateAvatar(String avatarUrl) async {
+    await updateProfile(data: {'avatarUrl': avatarUrl});
+  }
+
+  static Future<void> addFeaturedImage(String imageUrl) async {
+    final user = _auth.currentUser;
+
+    if (user == null) {
+      throw Exception('User chưa đăng nhập');
+    }
+
+    await _users.doc(user.uid).update({
+      'featuredImageUrls': FieldValue.arrayUnion([imageUrl]),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  static Future<void> removeFeaturedImage(String imageUrl) async {
+    final user = _auth.currentUser;
+
+    if (user == null) {
+      throw Exception('User chưa đăng nhập');
+    }
+
+    await _users.doc(user.uid).update({
+      'featuredImageUrls': FieldValue.arrayRemove([imageUrl]),
       'updatedAt': FieldValue.serverTimestamp(),
     });
   }
