@@ -100,6 +100,57 @@ class MarketService {
     });
   }
 
+  static Future<void> updatePost({
+    required String postId,
+    required String title,
+    required String description,
+    required num price,
+    required String category,
+  }) async {
+    final user = _auth.currentUser;
+
+    if (user == null) {
+      throw Exception('Bạn chưa đăng nhập.');
+    }
+
+    final trimmedTitle = title.trim();
+    final trimmedDescription = description.trim();
+
+    if (trimmedTitle.isEmpty) {
+      throw Exception('Vui lòng nhập tiêu đề bài đăng.');
+    }
+
+    if (trimmedDescription.isEmpty) {
+      throw Exception('Vui lòng nhập mô tả bài đăng.');
+    }
+
+    if (price < 0) {
+      throw Exception('Giá không hợp lệ.');
+    }
+
+    final postRef = _marketPostsRef.doc(postId);
+    final postDoc = await postRef.get();
+
+    if (!postDoc.exists) {
+      throw Exception('Bài đăng không tồn tại.');
+    }
+
+    final data = postDoc.data() ?? {};
+    final sellerId = data['sellerId']?.toString() ?? '';
+
+    if (sellerId != user.uid) {
+      throw Exception('Bạn chỉ có thể chỉnh sửa bài của chính mình.');
+    }
+
+    await postRef.update({
+      'title': trimmedTitle,
+      'description': trimmedDescription,
+      'price': price,
+      'category': category,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
   static Future<void> deletePost(String postId) async {
     final user = _auth.currentUser;
 

@@ -20,6 +20,11 @@ class _MarketDetailScreenState extends State<MarketDetailScreen> {
   bool _isDeleting = false;
   late bool _isSold;
 
+  late String _title;
+  late String _description;
+  late num _price;
+  late String _category;
+
   String get _currentUserId {
     return FirebaseAuth.instance.currentUser?.uid ?? '';
   }
@@ -31,7 +36,12 @@ class _MarketDetailScreenState extends State<MarketDetailScreen> {
   @override
   void initState() {
     super.initState();
+
     _isSold = widget.post.isSold;
+    _title = widget.post.title;
+    _description = widget.post.description;
+    _price = widget.post.price;
+    _category = widget.post.category;
   }
 
   String _formatPrice(num price) {
@@ -84,6 +94,41 @@ class _MarketDetailScreenState extends State<MarketDetailScreen> {
         });
       }
     }
+  }
+
+  Future<void> _openEditSheet() async {
+    if (!_isMine || _isSold) return;
+
+    final result = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) {
+        return _EditMarketPostSheet(
+          postId: widget.post.id,
+          initialTitle: _title,
+          initialDescription: _description,
+          initialPrice: _price,
+          initialCategory: _category,
+        );
+      },
+    );
+
+    if (result == null || !mounted) return;
+
+    setState(() {
+      _title = result['title']?.toString() ?? _title;
+      _description = result['description']?.toString() ?? _description;
+      _price = result['price'] is num ? result['price'] as num : _price;
+      _category = result['category']?.toString() ?? _category;
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Đã cập nhật bài đăng Market.'),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
   Future<void> _markAsSold() async {
@@ -203,8 +248,6 @@ class _MarketDetailScreenState extends State<MarketDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final post = widget.post;
-
     return Scaffold(
       backgroundColor: const Color(0xFFF7F3FF),
       appBar: AppBar(
@@ -213,6 +256,12 @@ class _MarketDetailScreenState extends State<MarketDetailScreen> {
         foregroundColor: const Color(0xFF2D1B69),
         elevation: 0,
         actions: [
+          if (_isMine && !_isSold)
+            IconButton(
+              tooltip: 'Chỉnh sửa bài đăng',
+              onPressed: _openEditSheet,
+              icon: const Icon(Icons.edit_outlined, color: Color(0xFF7B61FF)),
+            ),
           if (_isMine)
             IconButton(
               tooltip: 'Xoá bài đăng',
@@ -236,9 +285,9 @@ class _MarketDetailScreenState extends State<MarketDetailScreen> {
         children: [
           _buildImageBox(),
           const SizedBox(height: 18),
-          _buildMainInfo(post),
+          _buildMainInfo(),
           const SizedBox(height: 14),
-          _buildDescription(post),
+          _buildDescription(),
           const SizedBox(height: 14),
           _buildSellerNote(),
         ],
@@ -297,7 +346,7 @@ class _MarketDetailScreenState extends State<MarketDetailScreen> {
     );
   }
 
-  Widget _buildMainInfo(MarketPost post) {
+  Widget _buildMainInfo() {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(18),
@@ -319,7 +368,7 @@ class _MarketDetailScreenState extends State<MarketDetailScreen> {
             spacing: 8,
             runSpacing: 8,
             children: [
-              _buildBadge(post.category, const Color(0xFF00A86B)),
+              _buildBadge(_category, const Color(0xFF00A86B)),
               _buildBadge(
                 _isSold ? 'Đã bán' : 'Đang bán',
                 _isSold ? Colors.grey : const Color(0xFF7B61FF),
@@ -329,7 +378,7 @@ class _MarketDetailScreenState extends State<MarketDetailScreen> {
           ),
           const SizedBox(height: 14),
           Text(
-            post.title,
+            _title,
             style: TextStyle(
               fontSize: 24,
               fontWeight: FontWeight.w900,
@@ -339,7 +388,7 @@ class _MarketDetailScreenState extends State<MarketDetailScreen> {
           ),
           const SizedBox(height: 10),
           Text(
-            _formatPrice(post.price),
+            _formatPrice(_price),
             style: TextStyle(
               fontSize: 22,
               fontWeight: FontWeight.w900,
@@ -351,7 +400,7 @@ class _MarketDetailScreenState extends State<MarketDetailScreen> {
     );
   }
 
-  Widget _buildDescription(MarketPost post) {
+  Widget _buildDescription() {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(18),
@@ -368,7 +417,7 @@ class _MarketDetailScreenState extends State<MarketDetailScreen> {
           ),
           const SizedBox(height: 10),
           Text(
-            post.description,
+            _description,
             style: const TextStyle(
               color: Colors.black87,
               height: 1.45,
@@ -524,6 +573,291 @@ class _MarketDetailScreenState extends State<MarketDetailScreen> {
           color: color,
           fontSize: 12,
           fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
+  }
+}
+
+class _EditMarketPostSheet extends StatefulWidget {
+  final String postId;
+  final String initialTitle;
+  final String initialDescription;
+  final num initialPrice;
+  final String initialCategory;
+
+  const _EditMarketPostSheet({
+    required this.postId,
+    required this.initialTitle,
+    required this.initialDescription,
+    required this.initialPrice,
+    required this.initialCategory,
+  });
+
+  @override
+  State<_EditMarketPostSheet> createState() => _EditMarketPostSheetState();
+}
+
+class _EditMarketPostSheetState extends State<_EditMarketPostSheet> {
+  final _formKey = GlobalKey<FormState>();
+
+  late final TextEditingController _titleController;
+  late final TextEditingController _descriptionController;
+  late final TextEditingController _priceController;
+
+  final List<String> _categories = const [
+    'Đồ cũ',
+    'Tài liệu',
+    'Phòng trọ',
+    'Vé sự kiện',
+    'Khác',
+  ];
+
+  late String _category;
+  bool _isSaving = false;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _titleController = TextEditingController(text: widget.initialTitle);
+    _descriptionController = TextEditingController(
+      text: widget.initialDescription,
+    );
+    _priceController = TextEditingController(
+      text: widget.initialPrice.round().toString(),
+    );
+
+    _category = _categories.contains(widget.initialCategory)
+        ? widget.initialCategory
+        : 'Khác';
+  }
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _descriptionController.dispose();
+    _priceController.dispose();
+    super.dispose();
+  }
+
+  num _parsePrice() {
+    final raw = _priceController.text.trim();
+    final digitsOnly = raw.replaceAll(RegExp(r'[^0-9]'), '');
+
+    if (digitsOnly.isEmpty) return 0;
+
+    return num.tryParse(digitsOnly) ?? 0;
+  }
+
+  Future<void> _submit() async {
+    if (!_formKey.currentState!.validate() || _isSaving) return;
+
+    final price = _parsePrice();
+
+    setState(() {
+      _isSaving = true;
+    });
+
+    try {
+      await MarketService.updatePost(
+        postId: widget.postId,
+        title: _titleController.text,
+        description: _descriptionController.text,
+        price: price,
+        category: _category,
+      );
+
+      if (!mounted) return;
+
+      Navigator.pop(context, {
+        'title': _titleController.text.trim(),
+        'description': _descriptionController.text.trim(),
+        'price': price,
+        'category': _category,
+      });
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Cập nhật thất bại: $e'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSaving = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: bottomInset),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
+        decoration: const BoxDecoration(
+          color: Color(0xFFF7F3FF),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        ),
+        child: SafeArea(
+          top: false,
+          child: Form(
+            key: _formKey,
+            child: ListView(
+              shrinkWrap: true,
+              children: [
+                Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'Chỉnh sửa bài đăng',
+                        style: TextStyle(
+                          fontSize: 21,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.pop(context),
+                      icon: const Icon(Icons.close_rounded),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                _buildTextField(
+                  controller: _titleController,
+                  label: 'Tiêu đề',
+                  hint: 'Ví dụ: Bán giáo trình CSDL',
+                  icon: Icons.title_rounded,
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) {
+                      return 'Nhập tiêu đề nha.';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 12),
+                _buildTextField(
+                  controller: _descriptionController,
+                  label: 'Mô tả',
+                  hint: 'Tình trạng, liên hệ, địa điểm nhận...',
+                  icon: Icons.description_rounded,
+                  maxLines: 4,
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) {
+                      return 'Nhập mô tả nha.';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 12),
+                _buildTextField(
+                  controller: _priceController,
+                  label: 'Giá',
+                  hint: 'Ví dụ: 50000',
+                  icon: Icons.payments_rounded,
+                  keyboardType: TextInputType.number,
+                  validator: (value) {
+                    final text = value?.trim() ?? '';
+                    final digitsOnly = text.replaceAll(RegExp(r'[^0-9]'), '');
+
+                    if (digitsOnly.isEmpty) {
+                      return 'Nhập giá nha.';
+                    }
+
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  value: _category,
+                  items: _categories.map((category) {
+                    return DropdownMenuItem(
+                      value: category,
+                      child: Text(category),
+                    );
+                  }).toList(),
+                  onChanged: (value) {
+                    if (value == null) return;
+
+                    setState(() {
+                      _category = value;
+                    });
+                  },
+                  decoration: InputDecoration(
+                    labelText: 'Danh mục',
+                    prefixIcon: const Icon(Icons.category_rounded),
+                    filled: true,
+                    fillColor: Colors.white,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(18),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                ElevatedButton.icon(
+                  onPressed: _isSaving ? null : _submit,
+                  icon: _isSaving
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.save_rounded),
+                  label: Text(_isSaving ? 'Đang lưu...' : 'Lưu thay đổi'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF7B61FF),
+                    foregroundColor: Colors.white,
+                    disabledBackgroundColor: Colors.grey.shade300,
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTextField({
+    required TextEditingController controller,
+    required String label,
+    required String hint,
+    required IconData icon,
+    required String? Function(String?) validator,
+    int maxLines = 1,
+    TextInputType? keyboardType,
+  }) {
+    return TextFormField(
+      controller: controller,
+      maxLines: maxLines,
+      keyboardType: keyboardType,
+      validator: validator,
+      decoration: InputDecoration(
+        labelText: label,
+        hintText: hint,
+        prefixIcon: Icon(icon),
+        filled: true,
+        fillColor: Colors.white,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(18),
+          borderSide: BorderSide.none,
         ),
       ),
     );
