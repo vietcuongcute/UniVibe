@@ -1,10 +1,10 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'market_detail_screen.dart';
 
 import '../models/market_post.dart';
 import '../services/market_service.dart';
 import 'chat_detail_screen.dart';
+import 'market_detail_screen.dart';
 
 class MarketTab extends StatefulWidget {
   const MarketTab({super.key});
@@ -14,6 +14,8 @@ class MarketTab extends StatefulWidget {
 }
 
 class _MarketTabState extends State<MarketTab> {
+  final TextEditingController _searchController = TextEditingController();
+
   final List<String> _categories = const [
     'Tất cả',
     'Đồ cũ',
@@ -23,16 +25,69 @@ class _MarketTabState extends State<MarketTab> {
     'Khác',
   ];
 
+  final List<String> _statusFilters = const [
+    'Tất cả',
+    'Đang bán',
+    'Đã bán',
+    'Bài của tôi',
+  ];
+
   String _selectedCategory = 'Tất cả';
+  String _selectedStatusFilter = 'Tất cả';
+  String _searchKeyword = '';
   bool _isOpeningChat = false;
 
   String get _currentUserId {
     return FirebaseAuth.instance.currentUser?.uid ?? '';
   }
 
+  @override
+  void initState() {
+    super.initState();
+
+    _searchController.addListener(() {
+      setState(() {
+        _searchKeyword = _searchController.text.trim().toLowerCase();
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
   List<MarketPost> _filterPosts(List<MarketPost> posts) {
-    if (_selectedCategory == 'Tất cả') return posts;
-    return posts.where((post) => post.category == _selectedCategory).toList();
+    var result = posts;
+
+    if (_selectedCategory != 'Tất cả') {
+      result = result
+          .where((post) => post.category == _selectedCategory)
+          .toList();
+    }
+
+    if (_selectedStatusFilter == 'Đang bán') {
+      result = result.where((post) => !post.isSold).toList();
+    } else if (_selectedStatusFilter == 'Đã bán') {
+      result = result.where((post) => post.isSold).toList();
+    } else if (_selectedStatusFilter == 'Bài của tôi') {
+      result = result.where((post) => post.sellerId == _currentUserId).toList();
+    }
+
+    if (_searchKeyword.isNotEmpty) {
+      result = result.where((post) {
+        final title = post.title.toLowerCase();
+        final description = post.description.toLowerCase();
+        final category = post.category.toLowerCase();
+
+        return title.contains(_searchKeyword) ||
+            description.contains(_searchKeyword) ||
+            category.contains(_searchKeyword);
+      }).toList();
+    }
+
+    return result;
   }
 
   String _formatPrice(num price) {
@@ -65,6 +120,7 @@ class _MarketTabState extends State<MarketTab> {
       await MarketService.markAsSold(post.id);
 
       if (!mounted) return;
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Đã đánh dấu bài đăng là đã bán.'),
@@ -73,6 +129,7 @@ class _MarketTabState extends State<MarketTab> {
       );
     } catch (e) {
       if (!mounted) return;
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Không thể đánh dấu đã bán: $e'),
@@ -118,6 +175,13 @@ class _MarketTabState extends State<MarketTab> {
     }
   }
 
+  void _openDetail(MarketPost post) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => MarketDetailScreen(post: post)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -133,27 +197,38 @@ class _MarketTabState extends State<MarketTab> {
         child: StreamBuilder<List<MarketPost>>(
           stream: MarketService.marketPostsStream(),
           builder: (context, snapshot) {
-            final posts = _filterPosts(snapshot.data ?? []);
+            final allPosts = snapshot.data ?? [];
+            final posts = _filterPosts(allPosts);
 
-            return ListView(
-              padding: const EdgeInsets.fromLTRB(18, 18, 18, 90),
-              children: [
-                _buildHeader(),
-                const SizedBox(height: 16),
-                _buildCategoryChips(),
-                const SizedBox(height: 16),
-                if (snapshot.connectionState == ConnectionState.waiting)
-                  const Padding(
-                    padding: EdgeInsets.only(top: 50),
-                    child: Center(child: CircularProgressIndicator()),
-                  )
-                else if (snapshot.hasError)
-                  _buildErrorState(snapshot.error.toString())
-                else if (posts.isEmpty)
-                  _buildEmptyState()
-                else
-                  ...posts.map(_buildPostCard),
-              ],
+            return RefreshIndicator(
+              onRefresh: () async {
+                await Future<void>.delayed(const Duration(milliseconds: 350));
+              },
+              child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.fromLTRB(18, 18, 18, 90),
+                children: [
+                  _buildHeader(allPosts.length),
+                  const SizedBox(height: 16),
+                  _buildSearchBox(),
+                  const SizedBox(height: 12),
+                  _buildStatusFilters(),
+                  const SizedBox(height: 12),
+                  _buildCategoryChips(),
+                  const SizedBox(height: 16),
+                  if (snapshot.connectionState == ConnectionState.waiting)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 50),
+                      child: Center(child: CircularProgressIndicator()),
+                    )
+                  else if (snapshot.hasError)
+                    _buildErrorState(snapshot.error.toString())
+                  else if (posts.isEmpty)
+                    _buildEmptyState()
+                  else
+                    ...posts.map(_buildPostCard),
+                ],
+              ),
             );
           },
         ),
@@ -161,40 +236,122 @@ class _MarketTabState extends State<MarketTab> {
     );
   }
 
-  Widget _buildHeader() {
+  Widget _buildHeader(int totalPosts) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(22),
       decoration: BoxDecoration(
-        color: Colors.white,
+        gradient: const LinearGradient(
+          colors: [Color(0xFF00A86B), Color(0xFF7B61FF)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
         borderRadius: BorderRadius.circular(26),
         boxShadow: [
           BoxShadow(
-            color: Colors.purple.withOpacity(0.08),
+            color: Colors.purple.withOpacity(0.12),
             blurRadius: 18,
             offset: const Offset(0, 8),
           ),
         ],
       ),
-      child: const Column(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.storefront_rounded, color: Color(0xFF00A86B), size: 40),
-          SizedBox(height: 14),
-          Text(
+          const Icon(Icons.storefront_rounded, color: Colors.white, size: 42),
+          const SizedBox(height: 14),
+          const Text(
             'UniVibe Market',
             style: TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
+              fontSize: 25,
+              fontWeight: FontWeight.w900,
               height: 1.2,
+              color: Colors.white,
             ),
           ),
-          SizedBox(height: 8),
-          Text(
+          const SizedBox(height: 8),
+          const Text(
             'Mua bán đồ cũ, tài liệu học tập, phòng trọ và đồ sinh viên trong trường.',
-            style: TextStyle(color: Colors.black54, fontSize: 14, height: 1.4),
+            style: TextStyle(color: Colors.white70, fontSize: 14, height: 1.4),
+          ),
+          const SizedBox(height: 14),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.18),
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Text(
+              '$totalPosts bài đăng',
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildSearchBox() {
+    return TextField(
+      controller: _searchController,
+      decoration: InputDecoration(
+        hintText: 'Tìm đồ cũ, tài liệu, phòng trọ...',
+        prefixIcon: const Icon(Icons.search_rounded),
+        suffixIcon: _searchKeyword.isEmpty
+            ? null
+            : IconButton(
+                onPressed: () {
+                  _searchController.clear();
+                },
+                icon: const Icon(Icons.close_rounded),
+              ),
+        filled: true,
+        fillColor: Colors.white,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 14,
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(20),
+          borderSide: BorderSide.none,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatusFilters() {
+    return SizedBox(
+      height: 42,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: _statusFilters.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 10),
+        itemBuilder: (context, index) {
+          final filter = _statusFilters[index];
+          final selected = filter == _selectedStatusFilter;
+
+          return ChoiceChip(
+            label: Text(filter),
+            selected: selected,
+            selectedColor: const Color(0xFF7B61FF).withOpacity(0.16),
+            backgroundColor: Colors.white,
+            side: BorderSide(
+              color: selected ? const Color(0xFF7B61FF) : Colors.transparent,
+            ),
+            labelStyle: TextStyle(
+              color: selected ? const Color(0xFF7B61FF) : Colors.black54,
+              fontWeight: selected ? FontWeight.bold : FontWeight.w500,
+            ),
+            onSelected: (_) {
+              setState(() {
+                _selectedStatusFilter = filter;
+              });
+            },
+          );
+        },
       ),
     );
   }
@@ -214,14 +371,14 @@ class _MarketTabState extends State<MarketTab> {
             label: Text(category),
             selected: selected,
             selectedColor: const Color(0xFF00A86B).withOpacity(0.16),
+            backgroundColor: Colors.white,
+            side: BorderSide(
+              color: selected ? const Color(0xFF00A86B) : Colors.transparent,
+            ),
             labelStyle: TextStyle(
               color: selected ? const Color(0xFF00875A) : Colors.black54,
               fontWeight: selected ? FontWeight.bold : FontWeight.w500,
             ),
-            side: BorderSide(
-              color: selected ? const Color(0xFF00A86B) : Colors.transparent,
-            ),
-            backgroundColor: Colors.white,
             onSelected: (_) {
               setState(() {
                 _selectedCategory = category;
@@ -238,12 +395,7 @@ class _MarketTabState extends State<MarketTab> {
 
     return InkWell(
       borderRadius: BorderRadius.circular(24),
-      onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => MarketDetailScreen(post: post)),
-        );
-      },
+      onTap: () => _openDetail(post),
       child: Container(
         margin: const EdgeInsets.only(bottom: 14),
         padding: const EdgeInsets.all(14),
@@ -281,6 +433,8 @@ class _MarketTabState extends State<MarketTab> {
                             _buildBadge('Đã bán', Colors.grey)
                           else
                             _buildBadge('Đang bán', const Color(0xFF7B61FF)),
+                          if (isMine)
+                            _buildBadge('Của tôi', const Color(0xFFE91E63)),
                         ],
                       ),
                       const SizedBox(height: 8),
@@ -346,7 +500,13 @@ class _MarketTabState extends State<MarketTab> {
                         ? null
                         : () => _messageSeller(post),
                     icon: const Icon(Icons.chat_bubble_rounded, size: 18),
-                    label: Text(isMine ? 'Bài của bạn' : 'Nhắn người bán'),
+                    label: Text(
+                      isMine
+                          ? 'Bài của bạn'
+                          : post.isSold
+                          ? 'Đã bán'
+                          : 'Nhắn người bán',
+                    ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF7B61FF),
                       foregroundColor: Colors.white,
@@ -407,6 +567,11 @@ class _MarketTabState extends State<MarketTab> {
   }
 
   Widget _buildEmptyState() {
+    final hasFilter =
+        _selectedCategory != 'Tất cả' ||
+        _selectedStatusFilter != 'Tất cả' ||
+        _searchKeyword.isNotEmpty;
+
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.only(top: 20),
@@ -415,19 +580,23 @@ class _MarketTabState extends State<MarketTab> {
         color: Colors.white,
         borderRadius: BorderRadius.circular(26),
       ),
-      child: const Column(
+      child: Column(
         children: [
-          Icon(Icons.storefront_outlined, color: Colors.grey, size: 46),
-          SizedBox(height: 12),
+          const Icon(Icons.storefront_outlined, color: Colors.grey, size: 46),
+          const SizedBox(height: 12),
           Text(
-            'Chưa có bài đăng Market',
-            style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+            hasFilter
+                ? 'Không tìm thấy bài phù hợp'
+                : 'Chưa có bài đăng Market',
+            style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
           ),
-          SizedBox(height: 6),
+          const SizedBox(height: 6),
           Text(
-            'Bấm “Đăng bán” để tạo bài đầu tiên.',
+            hasFilter
+                ? 'Thử đổi từ khoá, danh mục hoặc bộ lọc nha.'
+                : 'Bấm “Đăng bán” để tạo bài đầu tiên.',
             textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.black54, height: 1.4),
+            style: const TextStyle(color: Colors.black54, height: 1.4),
           ),
         ],
       ),
