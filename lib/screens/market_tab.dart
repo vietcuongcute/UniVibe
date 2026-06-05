@@ -1,5 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'market_detail_screen.dart';
 
 import '../models/market_post.dart';
 import '../services/market_service.dart';
@@ -235,120 +236,133 @@ class _MarketTabState extends State<MarketTab> {
   Widget _buildPostCard(MarketPost post) {
     final isMine = post.sellerId == _currentUserId;
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 14),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(24),
-        border: post.isSold
-            ? Border.all(color: Colors.grey.shade300)
-            : Border.all(color: Colors.transparent),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 14,
-            offset: const Offset(0, 7),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              _buildImagePlaceholder(post),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 6,
-                      children: [
-                        _buildBadge(post.category, const Color(0xFF00A86B)),
-                        if (post.isSold)
-                          _buildBadge('Đã bán', Colors.grey)
-                        else
-                          _buildBadge('Đang bán', const Color(0xFF7B61FF)),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      post.title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.bold,
-                        decoration: post.isSold
-                            ? TextDecoration.lineThrough
-                            : null,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      _formatPrice(post.price),
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w800,
-                        color: post.isSold
-                            ? Colors.black45
-                            : const Color(0xFFE91E63),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Text(
-            post.description,
-            style: const TextStyle(color: Colors.black54, height: 1.4),
-          ),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              if (isMine && !post.isSold)
+    return InkWell(
+      borderRadius: BorderRadius.circular(24),
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => MarketDetailScreen(post: post)),
+        );
+      },
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 14),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(24),
+          border: post.isSold
+              ? Border.all(color: Colors.grey.shade300)
+              : Border.all(color: Colors.transparent),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 14,
+              offset: const Offset(0, 7),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                _buildImagePlaceholder(post),
+                const SizedBox(width: 14),
                 Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () => _markAsSold(post),
-                    icon: const Icon(Icons.check_circle_outline_rounded),
-                    label: const Text('Đã bán'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: const Color(0xFF00A86B),
-                      side: const BorderSide(color: Color(0xFF00A86B)),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 6,
+                        children: [
+                          _buildBadge(post.category, const Color(0xFF00A86B)),
+                          if (post.isSold)
+                            _buildBadge('Đã bán', Colors.grey)
+                          else
+                            _buildBadge('Đang bán', const Color(0xFF7B61FF)),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        post.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.bold,
+                          decoration: post.isSold
+                              ? TextDecoration.lineThrough
+                              : null,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        _formatPrice(post.price),
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                          color: post.isSold
+                              ? Colors.black45
+                              : const Color(0xFFE91E63),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                const Icon(Icons.chevron_right_rounded, color: Colors.black38),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              post.description,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Colors.black54, height: 1.4),
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                if (isMine && !post.isSold)
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => _markAsSold(post),
+                      icon: const Icon(Icons.check_circle_outline_rounded),
+                      label: const Text('Đã bán'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFF00A86B),
+                        side: const BorderSide(color: Color(0xFF00A86B)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                      ),
+                    ),
+                  ),
+                if (isMine && !post.isSold) const SizedBox(width: 10),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: isMine || post.isSold || _isOpeningChat
+                        ? null
+                        : () => _messageSeller(post),
+                    icon: const Icon(Icons.chat_bubble_rounded, size: 18),
+                    label: Text(isMine ? 'Bài của bạn' : 'Nhắn người bán'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF7B61FF),
+                      foregroundColor: Colors.white,
+                      disabledBackgroundColor: Colors.grey.shade300,
+                      disabledForegroundColor: Colors.white,
+                      elevation: 0,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(16),
                       ),
                     ),
                   ),
                 ),
-              if (isMine && !post.isSold) const SizedBox(width: 10),
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: isMine || post.isSold || _isOpeningChat
-                      ? null
-                      : () => _messageSeller(post),
-                  icon: const Icon(Icons.chat_bubble_rounded, size: 18),
-                  label: Text(isMine ? 'Bài của bạn' : 'Nhắn người bán'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF7B61FF),
-                    foregroundColor: Colors.white,
-                    disabledBackgroundColor: Colors.grey.shade300,
-                    disabledForegroundColor: Colors.white,
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }

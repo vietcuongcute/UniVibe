@@ -100,6 +100,30 @@ class MarketService {
     });
   }
 
+  static Future<void> deletePost(String postId) async {
+    final user = _auth.currentUser;
+
+    if (user == null) {
+      throw Exception('Bạn chưa đăng nhập.');
+    }
+
+    final postRef = _marketPostsRef.doc(postId);
+    final postDoc = await postRef.get();
+
+    if (!postDoc.exists) {
+      throw Exception('Bài đăng không tồn tại.');
+    }
+
+    final data = postDoc.data() ?? {};
+    final sellerId = data['sellerId']?.toString() ?? '';
+
+    if (sellerId != user.uid) {
+      throw Exception('Bạn chỉ có thể xoá bài của chính mình.');
+    }
+
+    await postRef.delete();
+  }
+
   static Future<String> startChatWithSeller(MarketPost post) async {
     final currentUser = _auth.currentUser;
 
