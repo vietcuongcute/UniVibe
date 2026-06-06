@@ -100,6 +100,13 @@ class MarketService {
     });
   }
 
+  static Stream<MarketPost?> marketPostStream(String postId) {
+    return _marketPostsRef.doc(postId).snapshots().map((doc) {
+      if (!doc.exists) return null;
+      return MarketPost.fromDoc(doc);
+    });
+  }
+
   static Future<void> updatePost({
     required String postId,
     required String title,
@@ -242,6 +249,43 @@ class MarketService {
     return chatRoomId;
   }
 
+  static Future<void> reportMarketPost({
+    required String postId,
+    required String sellerId,
+    required String reason,
+    required String description,
+  }) async {
+    final user = _auth.currentUser;
+
+    if (user == null) {
+      throw Exception('Bạn chưa đăng nhập.');
+    }
+
+    if (postId.trim().isEmpty) {
+      throw Exception('Không tìm thấy bài đăng.');
+    }
+
+    if (sellerId == user.uid) {
+      throw Exception('Bạn không thể báo cáo bài của chính mình.');
+    }
+
+    if (reason.trim().isEmpty) {
+      throw Exception('Vui lòng chọn lý do báo cáo.');
+    }
+
+    await _db.collection('reports').add({
+      'reporterId': user.uid,
+      'targetType': 'marketPost',
+      'targetId': postId,
+      'targetOwnerId': sellerId,
+      'reason': reason.trim(),
+      'description': description.trim(),
+      'status': 'pending',
+      'createdAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
   static Future<String?> _findExistingDirectRoom({
     required String currentUserId,
     required String sellerId,
@@ -265,6 +309,14 @@ class MarketService {
     }
 
     return null;
+  }
+
+  static Future<UserProfile> getSellerProfile(String sellerId) async {
+    if (sellerId.trim().isEmpty) {
+      throw Exception('Không tìm thấy người bán.');
+    }
+
+    return _getUserProfile(sellerId);
   }
 
   static Future<UserProfile> _getUserProfile(String uid) async {

@@ -33,7 +33,7 @@ class _MarketTabState extends State<MarketTab> {
   ];
 
   String _selectedCategory = 'Tất cả';
-  String _selectedStatusFilter = 'Tất cả';
+  String _selectedStatusFilter = 'Đang bán';
   String _searchKeyword = '';
   bool _isOpeningChat = false;
 
@@ -178,7 +178,7 @@ class _MarketTabState extends State<MarketTab> {
   void _openDetail(MarketPost post) {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => MarketDetailScreen(post: post)),
+      MaterialPageRoute(builder: (_) => MarketDetailScreen(postId: post.id)),
     );
   }
 
