@@ -2,10 +2,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../services/auth_service.dart';
-import '../services/user_profile_service.dart';
-import 'create_profile_screen.dart';
-import 'home_screen.dart';
+
 import 'register_screen.dart';
+import 'auth_gate.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -21,7 +20,7 @@ class _LoginScreenState extends State<LoginScreen> {
   bool isLoading = false;
   bool obscurePassword = true;
 
-  Future<void> login() async {
+  Future login() async {
     final email = emailController.text.trim();
     final password = passwordController.text.trim();
 
@@ -35,21 +34,13 @@ class _LoginScreenState extends State<LoginScreen> {
 
       await AuthService.login(email: email, password: password);
 
-      final hasProfile = await UserProfileService.hasProfile();
-
       if (!mounted) return;
 
-      if (hasProfile) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const HomeScreen()),
-        );
-      } else {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const CreateProfileScreen()),
-        );
-      }
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (_) => const AuthGate()),
+        (route) => false,
+      );
     } on FirebaseAuthException catch (e) {
       showMessage(_getLoginErrorMessage(e));
     } catch (e) {
