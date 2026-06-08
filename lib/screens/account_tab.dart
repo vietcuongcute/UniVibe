@@ -6,6 +6,8 @@ import '../models/user_profile.dart';
 import '../services/chat_service.dart';
 import '../services/user_profile_service.dart';
 import 'auth_gate.dart';
+import '../services/admin_service.dart';
+import 'admin_dashboard_screen.dart';
 
 class AccountTab extends StatefulWidget {
   const AccountTab({super.key});
@@ -942,7 +944,50 @@ class _AccountTabState extends State<AccountTab> {
               ),
             ),
           ),
+
           const SizedBox(height: 12),
+
+          FutureBuilder<bool>(
+            future: AdminService.hasAdminAccess(),
+            builder: (context, snapshot) {
+              final canOpenAdmin = snapshot.data == true;
+
+              if (!canOpenAdmin) {
+                return const SizedBox.shrink();
+              }
+
+              return Column(
+                children: [
+                  SizedBox(
+                    width: double.infinity,
+                    height: 52,
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const AdminDashboardScreen(),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.admin_panel_settings_rounded),
+                      label: const Text('Admin Dashboard'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF2D1B69),
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(18),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+              );
+            },
+          ),
+
           SizedBox(
             width: double.infinity,
             height: 52,
