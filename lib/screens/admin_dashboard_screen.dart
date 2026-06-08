@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'admin_content_detail_screen.dart';
 
 import '../services/admin_service.dart';
 
@@ -813,6 +814,31 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     );
   }
 
+  Widget _buildSmallTag({required IconData icon, required String text}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF7F3FF),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: _primary),
+          const SizedBox(width: 5),
+          Text(
+            text,
+            style: const TextStyle(
+              color: Colors.black54,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildContentTab() {
     return Column(
       children: [
@@ -908,62 +934,126 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
         data['sellerId']?.toString() ??
         data['userId']?.toString() ??
         '';
+
     final createdAt = _formatTimestamp(data['createdAt']);
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 14),
-      padding: const EdgeInsets.all(16),
-      decoration: _cardDecoration(),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              _buildStatusPill(status),
-              const Spacer(),
-              Text(
-                createdAt,
-                style: const TextStyle(color: Colors.black45, fontSize: 12),
+    final price = data['price'];
+    final category = data['category']?.toString() ?? '';
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(24),
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => AdminContentDetailScreen(
+              collectionName: _contentType,
+              documentId: doc.id,
+            ),
+          ),
+        );
+      },
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 14),
+        padding: const EdgeInsets.all(16),
+        decoration: _cardDecoration(),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                _buildStatusPill(status),
+                const Spacer(),
+                Text(
+                  createdAt,
+                  style: const TextStyle(color: Colors.black45, fontSize: 12),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+
+            Text(
+              title,
+              maxLines: 4,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: _darkText,
+                fontSize: 16,
+                fontWeight: FontWeight.w900,
+                height: 1.35,
+              ),
+            ),
+
+            if (price != null || category.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  if (category.isNotEmpty)
+                    _buildSmallTag(
+                      icon: Icons.category_rounded,
+                      text: category,
+                    ),
+                  if (price != null)
+                    _buildSmallTag(
+                      icon: Icons.payments_rounded,
+                      text: '${price.toString()} đ',
+                    ),
+                ],
               ),
             ],
-          ),
-          const SizedBox(height: 12),
-          Text(
-            title,
-            maxLines: 4,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              color: _darkText,
-              fontSize: 16,
-              fontWeight: FontWeight.w900,
-              height: 1.35,
+
+            const SizedBox(height: 10),
+            _buildMiniInfo('ID', doc.id),
+            _buildMiniInfo('Author', authorId.isEmpty ? 'Không rõ' : authorId),
+
+            const SizedBox(height: 12),
+
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => AdminContentDetailScreen(
+                            collectionName: _contentType,
+                            documentId: doc.id,
+                          ),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.open_in_new_rounded, size: 18),
+                    label: const Text('Xem chi tiết'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                OutlinedButton.icon(
+                  onPressed: status == 'hidden'
+                      ? null
+                      : () => _guardAction(() async {
+                          await FirebaseFirestore.instance
+                              .collection(_contentType)
+                              .doc(doc.id)
+                              .update({
+                                'status': 'hidden',
+                                'hiddenBy': AdminService.currentUid,
+                                'hiddenAt': FieldValue.serverTimestamp(),
+                                'updatedAt': FieldValue.serverTimestamp(),
+                              });
+                        }),
+                  icon: const Icon(Icons.visibility_off_rounded, size: 18),
+                  label: const Text('Ẩn'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFFE53935),
+                  ),
+                ),
+              ],
             ),
-          ),
-          const SizedBox(height: 10),
-          _buildMiniInfo('ID', doc.id),
-          _buildMiniInfo('Author', authorId.isEmpty ? 'Không rõ' : authorId),
-          const SizedBox(height: 12),
-          OutlinedButton.icon(
-            onPressed: status == 'hidden'
-                ? null
-                : () => _guardAction(() async {
-                    await FirebaseFirestore.instance
-                        .collection(_contentType)
-                        .doc(doc.id)
-                        .update({
-                          'status': 'hidden',
-                          'hiddenBy': AdminService.currentUid,
-                          'hiddenAt': FieldValue.serverTimestamp(),
-                          'updatedAt': FieldValue.serverTimestamp(),
-                        });
-                  }),
-            icon: const Icon(Icons.visibility_off_rounded, size: 18),
-            label: const Text('Ẩn nội dung'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: const Color(0xFFE53935),
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
