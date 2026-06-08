@@ -27,6 +27,7 @@ class AdminService {
 
   static Stream<DocumentSnapshot<Map<String, dynamic>>> currentUserStream() {
     final uid = currentUid;
+
     if (uid == null) {
       throw Exception('User chưa đăng nhập');
     }
@@ -36,6 +37,7 @@ class AdminService {
 
   static Future<String> getCurrentRole() async {
     final uid = currentUid;
+
     if (uid == null) {
       return 'student';
     }
@@ -48,11 +50,13 @@ class AdminService {
 
   static Future<bool> hasAdminAccess() async {
     final role = await getCurrentRole();
+
     return role == 'admin' || role == 'moderator';
   }
 
   static Future<bool> isAdmin() async {
     final role = await getCurrentRole();
+
     return role == 'admin';
   }
 
@@ -69,11 +73,13 @@ class AdminService {
     String adminNote = '',
   }) async {
     final allowed = await hasAdminAccess();
+
     if (!allowed) {
       throw Exception('Bạn không có quyền xử lý report');
     }
 
     final uid = currentUid;
+
     if (uid == null) {
       throw Exception('User chưa đăng nhập');
     }
@@ -93,11 +99,13 @@ class AdminService {
     String adminNote = '',
   }) async {
     final allowed = await hasAdminAccess();
+
     if (!allowed) {
       throw Exception('Bạn không có quyền xử lý report');
     }
 
     final uid = currentUid;
+
     if (uid == null) {
       throw Exception('User chưa đăng nhập');
     }
@@ -119,16 +127,18 @@ class AdminService {
     String adminNote = '',
   }) async {
     final allowed = await hasAdminAccess();
+
     if (!allowed) {
       throw Exception('Bạn không có quyền ẩn nội dung');
     }
 
     final uid = currentUid;
+
     if (uid == null) {
       throw Exception('User chưa đăng nhập');
     }
 
-    final collectionName = _getCollectionName(targetType);
+    final collectionName = getCollectionNameFromTargetType(targetType);
 
     if (collectionName == null) {
       throw Exception('Chưa hỗ trợ ẩn targetType: $targetType');
@@ -167,6 +177,7 @@ class AdminService {
     required String role,
   }) async {
     final admin = await isAdmin();
+
     if (!admin) {
       throw Exception('Chỉ admin mới được gán role');
     }
@@ -181,22 +192,52 @@ class AdminService {
     });
   }
 
+  static Future<void> updateUserStatus({
+    required String userId,
+    required String status,
+  }) async {
+    final admin = await isAdmin();
+
+    if (!admin) {
+      throw Exception('Chỉ admin mới được khóa/mở khóa user');
+    }
+
+    if (!['active', 'blocked'].contains(status)) {
+      throw Exception('Status không hợp lệ');
+    }
+
+    await usersRef.doc(userId).update({
+      'status': status,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
   static Future<void> signOut() async {
     await _auth.signOut();
   }
 
-  static String? _getCollectionName(String targetType) {
+  static String? getCollectionNameFromTargetType(String targetType) {
     switch (targetType) {
       case 'marketPost':
+      case 'marketPosts':
         return 'marketPosts';
+
       case 'confession':
+      case 'confessions':
         return 'confessions';
+
       case 'moment':
+      case 'moments':
         return 'moments';
+
       case 'comment':
+      case 'comments':
         return 'comments';
+
       case 'user':
+      case 'users':
         return 'users';
+
       default:
         return null;
     }

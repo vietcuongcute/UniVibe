@@ -26,6 +26,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
   ];
 
   String _contentType = 'confessions';
+  String _reportFilter = 'all';
+  String _userSearchKeyword = '';
 
   @override
   void initState() {
@@ -410,37 +412,97 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
   }
 
   Widget _buildReportsTab() {
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: AdminService.reportsStream(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(
-            child: CircularProgressIndicator(color: _primary),
-          );
-        }
+    return Column(
+      children: [
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(18, 16, 18, 8),
+          color: _bg,
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                _buildReportFilterChip('all', 'Tất cả'),
+                const SizedBox(width: 8),
+                _buildReportFilterChip('pending', 'Pending'),
+                const SizedBox(width: 8),
+                _buildReportFilterChip('resolved', 'Resolved'),
+                const SizedBox(width: 8),
+                _buildReportFilterChip('rejected', 'Rejected'),
+              ],
+            ),
+          ),
+        ),
 
-        if (snapshot.hasError) {
-          return _buildErrorState(snapshot.error.toString());
-        }
+        Expanded(
+          child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+            stream: AdminService.reportsStream(),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(
+                  child: CircularProgressIndicator(color: _primary),
+                );
+              }
 
-        final reports = snapshot.data?.docs ?? [];
+              if (snapshot.hasError) {
+                return _buildErrorState(snapshot.error.toString());
+              }
 
-        if (reports.isEmpty) {
-          return _buildEmptyState(
-            icon: Icons.flag_outlined,
-            title: 'Chưa có report',
-            subtitle: 'Khi sinh viên report nội dung, report sẽ hiện ở đây.',
-          );
-        }
+              final allReports = snapshot.data?.docs ?? [];
 
-        return ListView.builder(
-          padding: const EdgeInsets.fromLTRB(18, 18, 18, 28),
-          itemCount: reports.length,
-          itemBuilder: (context, index) {
-            final doc = reports[index];
-            return _buildReportCard(doc);
-          },
-        );
+              final reports = allReports.where((doc) {
+                if (_reportFilter == 'all') return true;
+
+                final data = doc.data();
+                final status = data['status']?.toString() ?? 'pending';
+
+                return status == _reportFilter;
+              }).toList();
+
+              if (reports.isEmpty) {
+                return _buildEmptyState(
+                  icon: Icons.flag_outlined,
+                  title: 'Không có report phù hợp',
+                  subtitle: _reportFilter == 'all'
+                      ? 'Khi sinh viên report nội dung, report sẽ hiện ở đây.'
+                      : 'Không có report trạng thái $_reportFilter.',
+                );
+              }
+
+              return ListView.builder(
+                padding: const EdgeInsets.fromLTRB(18, 8, 18, 28),
+                itemCount: reports.length,
+                itemBuilder: (context, index) {
+                  final doc = reports[index];
+                  return _buildReportCard(doc);
+                },
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildReportFilterChip(String value, String label) {
+    final bool selected = _reportFilter == value;
+
+    return ChoiceChip(
+      selected: selected,
+      label: Text(label),
+      selectedColor: const Color(0xFFEDE7FF),
+      backgroundColor: Colors.white,
+      labelStyle: TextStyle(
+        color: selected ? _primary : Colors.black54,
+        fontWeight: selected ? FontWeight.w900 : FontWeight.w600,
+      ),
+      side: BorderSide(
+        color: selected ? _primary.withOpacity(0.35) : Colors.purple.shade100,
+      ),
+      onSelected: (_) {
+        setState(() {
+          _reportFilter = value;
+        });
       },
     );
   }
@@ -566,37 +628,97 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
   }
 
   Widget _buildUsersTab() {
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: AdminService.usersStream(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(
-            child: CircularProgressIndicator(color: _primary),
-          );
-        }
+    return Column(
+      children: [
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(18, 16, 18, 10),
+          color: _bg,
+          child: TextField(
+            onChanged: (value) {
+              setState(() {
+                _userSearchKeyword = value.trim().toLowerCase();
+              });
+            },
+            decoration: InputDecoration(
+              hintText: 'Tìm user theo tên, email, ngành, role...',
+              prefixIcon: const Icon(Icons.search_rounded, color: _primary),
+              filled: true,
+              fillColor: Colors.white,
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 14,
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(18),
+                borderSide: BorderSide.none,
+              ),
+            ),
+          ),
+        ),
 
-        if (snapshot.hasError) {
-          return _buildErrorState(snapshot.error.toString());
-        }
+        Expanded(
+          child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+            stream: AdminService.usersStream(),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(
+                  child: CircularProgressIndicator(color: _primary),
+                );
+              }
 
-        final users = snapshot.data?.docs ?? [];
+              if (snapshot.hasError) {
+                return _buildErrorState(snapshot.error.toString());
+              }
 
-        if (users.isEmpty) {
-          return _buildEmptyState(
-            icon: Icons.people_outline_rounded,
-            title: 'Chưa có user',
-            subtitle: 'User trong collection users sẽ hiện ở đây.',
-          );
-        }
+              final allUsers = snapshot.data?.docs ?? [];
 
-        return ListView.builder(
-          padding: const EdgeInsets.fromLTRB(18, 18, 18, 28),
-          itemCount: users.length,
-          itemBuilder: (context, index) {
-            return _buildUserCard(users[index]);
-          },
-        );
-      },
+              final users = allUsers.where((doc) {
+                if (_userSearchKeyword.isEmpty) return true;
+
+                final data = doc.data();
+
+                final nickname =
+                    data['nickname']?.toString().toLowerCase() ?? '';
+                final email = data['email']?.toString().toLowerCase() ?? '';
+                final major = data['major']?.toString().toLowerCase() ?? '';
+                final role = data['role']?.toString().toLowerCase() ?? '';
+                final university =
+                    data['university']?.toString().toLowerCase() ?? '';
+
+                final searchText = [
+                  nickname,
+                  email,
+                  major,
+                  role,
+                  university,
+                  doc.id.toLowerCase(),
+                ].join(' ');
+
+                return searchText.contains(_userSearchKeyword);
+              }).toList();
+
+              if (users.isEmpty) {
+                return _buildEmptyState(
+                  icon: Icons.people_outline_rounded,
+                  title: 'Không tìm thấy user',
+                  subtitle: _userSearchKeyword.isEmpty
+                      ? 'User trong collection users sẽ hiện ở đây.'
+                      : 'Không có user nào khớp từ khóa "$_userSearchKeyword".',
+                );
+              }
+
+              return ListView.builder(
+                padding: const EdgeInsets.fromLTRB(18, 8, 18, 28),
+                itemCount: users.length,
+                itemBuilder: (context, index) {
+                  return _buildUserCard(users[index]);
+                },
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 
@@ -608,6 +730,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     final university = data['university']?.toString() ?? '';
     final major = data['major']?.toString() ?? '';
     final role = data['role']?.toString() ?? 'student';
+    final status = data['status']?.toString() ?? 'active';
     final avatarUrl = data['avatarUrl']?.toString() ?? '';
 
     final firstLetter = nickname.trim().isEmpty
@@ -672,6 +795,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               _buildRolePill(role),
+              const SizedBox(height: 6),
+              _buildStatusPill(status),
               const SizedBox(height: 8),
               OutlinedButton(
                 onPressed: () => _showChangeRoleSheet(
