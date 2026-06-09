@@ -1,16 +1,16 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 
 import '../models/user_profile.dart';
 import '../services/chat_service.dart';
 import '../services/user_profile_service.dart';
 import 'auth_gate.dart';
-import '../services/admin_service.dart';
-import 'admin_dashboard_screen.dart';
 
 class AccountTab extends StatefulWidget {
-  const AccountTab({super.key});
+  final ValueChanged<int>? onNavigate;
+
+  const AccountTab({super.key, this.onNavigate});
 
   @override
   State<AccountTab> createState() => _AccountTabState();
@@ -18,55 +18,87 @@ class AccountTab extends StatefulWidget {
 
 class _AccountTabState extends State<AccountTab> {
   static const Color _primary = Color(0xFF7B61FF);
+  static const Color _pink = Color(0xFFEC5AA6);
   static const Color _darkText = Color(0xFF2D1B69);
   static const Color _bg = Color(0xFFF7F3FF);
 
   late Future<UserProfile?> _profileFuture;
-  bool _isUploadingImage = false;
+  late Future<_UserDashboardStats> _statsFuture;
 
   @override
   void initState() {
     super.initState();
-    _profileFuture = UserProfileService.getCurrentUserProfile();
+    _reloadData();
   }
 
-  void _reloadProfile() {
+  void _reloadData() {
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+
     setState(() {
       _profileFuture = UserProfileService.getCurrentUserProfile();
+      _statsFuture = _loadStats(uid);
     });
   }
 
-  Future<XFile?> _pickImage() async {
-    final picker = ImagePicker();
+  Future<_UserDashboardStats> _loadStats(String uid) async {
+    if (uid.isEmpty) return _UserDashboardStats.empty();
 
-    return picker.pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 75,
-      maxWidth: 1200,
-    );
-  }
+    final db = FirebaseFirestore.instance;
 
-  Future<void> _uploadAvatar() async {
-    _showMessage(
-      'Chức năng upload ảnh sẽ làm sau vì project chưa bật Firebase Storage',
-    );
-  }
-
-  Future<void> _addFeaturedImage() async {
-    _showMessage(
-      'Chức năng thêm ảnh nổi bật sẽ làm sau vì project chưa bật Firebase Storage',
-    );
-  }
-
-  Future<void> _removeFeaturedImage(String imageUrl) async {
     try {
-      await UserProfileService.removeFeaturedImage(imageUrl);
+      final userDoc = await db.collection('users').doc(uid).get();
+      final role = userDoc.data()?['role']?.toString() ?? 'student';
 
-      _reloadProfile();
-      _showMessage('Đã xoá ảnh nổi bật');
-    } catch (e) {
-      _showMessage('Xoá ảnh thất bại: $e');
+      final results = await Future.wait<int>([
+        _safeCount(db.collection('signals').where('senderId', isEqualTo: uid)),
+        _safeCount(
+          db.collection('matches').where('userIds', arrayContains: uid),
+        ),
+        _safeCount(
+          db.collection('chatRooms').where('userIds', arrayContains: uid),
+        ),
+        _safeCount(
+          db.collection('confessions').where('authorId', isEqualTo: uid),
+        ),
+        _safeCountMoment(uid),
+        _safeCount(
+          db.collection('marketPosts').where('sellerId', isEqualTo: uid),
+        ),
+      ]);
+
+      return _UserDashboardStats(
+        sentSignals: results[0],
+        matches: results[1],
+        chatRooms: results[2],
+        confessions: results[3],
+        moments: results[4],
+        marketPosts: results[5],
+        role: role,
+      );
+    } catch (_) {
+      return _UserDashboardStats.empty();
     }
+  }
+
+  Future<int> _safeCount(Query<Map<String, dynamic>> query) async {
+    try {
+      final snapshot = await query.get();
+      return snapshot.docs.length;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  Future<int> _safeCountMoment(String uid) async {
+    final db = FirebaseFirestore.instance;
+
+    final byAuthorId = await _safeCount(
+      db.collection('moments').where('authorId', isEqualTo: uid),
+    );
+
+    if (byAuthorId > 0) return byAuthorId;
+
+    return _safeCount(db.collection('moments').where('userId', isEqualTo: uid));
   }
 
   Future<void> _logout() async {
@@ -136,7 +168,6 @@ class _AccountTabState extends State<AccountTab> {
     );
     final majorController = TextEditingController(text: profile.major);
     final bioController = TextEditingController(text: profile.bio);
-
     final interestsController = TextEditingController(
       text: profile.interests.join(', '),
     );
@@ -209,7 +240,7 @@ class _AccountTabState extends State<AccountTab> {
                 if (!mounted) return;
 
                 Navigator.pop(dialogContext);
-                _reloadProfile();
+                _reloadData();
                 _showMessage('Đã cập nhật hồ sơ');
               } catch (e) {
                 _showMessage('Cập nhật thất bại: $e');
@@ -234,7 +265,7 @@ class _AccountTabState extends State<AccountTab> {
                 style: TextStyle(fontWeight: FontWeight.bold),
               ),
               content: SizedBox(
-                width: 520,
+                width: 560,
                 child: SingleChildScrollView(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
@@ -245,21 +276,18 @@ class _AccountTabState extends State<AccountTab> {
                         icon: Icons.badge_rounded,
                       ),
                       const SizedBox(height: 12),
-
                       _buildDialogTextField(
                         controller: universityController,
                         label: 'Trường',
                         icon: Icons.school_rounded,
                       ),
                       const SizedBox(height: 12),
-
                       _buildDialogTextField(
                         controller: majorController,
                         label: 'Ngành học',
                         icon: Icons.menu_book_rounded,
                       ),
                       const SizedBox(height: 12),
-
                       Row(
                         children: [
                           Expanded(
@@ -324,14 +352,12 @@ class _AccountTabState extends State<AccountTab> {
                         ],
                       ),
                       const SizedBox(height: 12),
-
                       _buildDialogTextField(
                         controller: bioController,
                         label: 'Bio',
                         icon: Icons.edit_rounded,
                         maxLines: 3,
                       ),
-
                       const SizedBox(height: 18),
                       _buildDialogSectionTitle(
                         icon: Icons.interests_rounded,
@@ -344,7 +370,6 @@ class _AccountTabState extends State<AccountTab> {
                         icon: Icons.favorite_rounded,
                         maxLines: 2,
                       ),
-
                       const SizedBox(height: 14),
                       _buildDialogSectionTitle(
                         icon: Icons.flag_rounded,
@@ -357,7 +382,6 @@ class _AccountTabState extends State<AccountTab> {
                         icon: Icons.rocket_launch_rounded,
                         maxLines: 2,
                       ),
-
                       const SizedBox(height: 14),
                       _buildDialogSectionTitle(
                         icon: Icons.auto_awesome_rounded,
@@ -370,7 +394,6 @@ class _AccountTabState extends State<AccountTab> {
                         icon: Icons.local_fire_department_rounded,
                         maxLines: 2,
                       ),
-
                       const SizedBox(height: 8),
                       const Align(
                         alignment: Alignment.centerLeft,
@@ -465,6 +488,16 @@ class _AccountTabState extends State<AccountTab> {
     );
   }
 
+  void _showStorageLaterMessage() {
+    _showMessage(
+      'Upload ảnh sẽ làm sau vì Firebase Storage chưa bật. Hiện tại dùng placeholder trước.',
+    );
+  }
+
+  void _goTo(int index) {
+    widget.onNavigate?.call(index);
+  }
+
   @override
   Widget build(BuildContext context) {
     final authUser = FirebaseAuth.instance.currentUser;
@@ -474,18 +507,18 @@ class _AccountTabState extends State<AccountTab> {
       body: SafeArea(
         child: FutureBuilder<UserProfile?>(
           future: _profileFuture,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
+          builder: (context, profileSnapshot) {
+            if (profileSnapshot.connectionState == ConnectionState.waiting) {
               return const Center(
                 child: CircularProgressIndicator(color: _primary),
               );
             }
 
-            if (snapshot.hasError) {
-              return _buildErrorState(snapshot.error.toString());
+            if (profileSnapshot.hasError) {
+              return _buildErrorState(profileSnapshot.error.toString());
             }
 
-            final profile = snapshot.data;
+            final profile = profileSnapshot.data;
 
             if (profile == null) {
               return _buildEmptyState();
@@ -494,37 +527,88 @@ class _AccountTabState extends State<AccountTab> {
             return RefreshIndicator(
               color: _primary,
               onRefresh: () async {
-                _reloadProfile();
+                _reloadData();
+                await Future.delayed(const Duration(milliseconds: 350));
               },
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(18, 18, 18, 28),
-                children: [
-                  _buildProfileHeader(profile, authUser?.email ?? ''),
-                  const SizedBox(height: 18),
-                  _buildInfoCard(profile),
-                  const SizedBox(height: 18),
-                  _buildTagSection(
-                    title: 'Mục tiêu',
-                    icon: Icons.flag_rounded,
-                    items: profile.goals,
-                  ),
-                  const SizedBox(height: 18),
-                  _buildTagSection(
-                    title: 'Sở thích',
-                    icon: Icons.interests_rounded,
-                    items: profile.interests,
-                  ),
-                  const SizedBox(height: 18),
-                  _buildTagSection(
-                    title: 'Vibe tags',
-                    icon: Icons.auto_awesome_rounded,
-                    items: profile.vibeTags,
-                  ),
-                  const SizedBox(height: 18),
-                  _buildFeaturedImagesSection(profile),
-                  const SizedBox(height: 18),
-                  _buildActionCard(profile),
-                ],
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final isWide = constraints.maxWidth >= 900;
+
+                  return ListView(
+                    padding: const EdgeInsets.fromLTRB(18, 18, 18, 28),
+                    children: [
+                      _buildHeroProfile(
+                        profile: profile,
+                        email: authUser?.email ?? '',
+                      ),
+                      const SizedBox(height: 18),
+                      FutureBuilder<_UserDashboardStats>(
+                        future: _statsFuture,
+                        builder: (context, statsSnapshot) {
+                          final stats =
+                              statsSnapshot.data ?? _UserDashboardStats.empty();
+
+                          return _buildStatsSection(stats);
+                        },
+                      ),
+                      const SizedBox(height: 18),
+                      if (isWide)
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(child: _buildInfoCard(profile)),
+                            const SizedBox(width: 18),
+                            Expanded(child: _buildQuickActions(profile)),
+                          ],
+                        )
+                      else ...[
+                        _buildInfoCard(profile),
+                        const SizedBox(height: 18),
+                        _buildQuickActions(profile),
+                      ],
+                      const SizedBox(height: 18),
+                      _buildSectionCard(
+                        title: 'Bio',
+                        icon: Icons.notes_rounded,
+                        child: Text(
+                          profile.bio.isEmpty
+                              ? 'Chưa có bio. Hãy viết vài dòng để người khác hiểu vibe của bạn hơn.'
+                              : profile.bio,
+                          style: const TextStyle(
+                            color: Colors.black87,
+                            height: 1.45,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                      _buildTagSection(
+                        title: 'Mục tiêu',
+                        icon: Icons.flag_rounded,
+                        items: profile.goals,
+                        emptyText:
+                            'Chưa cập nhật mục tiêu. Ví dụ: tìm bạn học, tìm teammate, tìm người yêu.',
+                      ),
+                      const SizedBox(height: 18),
+                      _buildTagSection(
+                        title: 'Sở thích',
+                        icon: Icons.interests_rounded,
+                        items: profile.interests,
+                        emptyText:
+                            'Chưa cập nhật sở thích. Ví dụ: game, cà phê, chạy deadline, nghe nhạc.',
+                      ),
+                      const SizedBox(height: 18),
+                      _buildTagSection(
+                        title: 'Vibe tags',
+                        icon: Icons.auto_awesome_rounded,
+                        items: profile.vibeTags,
+                        emptyText:
+                            'Chưa cập nhật vibe tags. Ví dụ: chill, hướng nội, năng động.',
+                      ),
+                      const SizedBox(height: 18),
+                      _buildFeaturedImagesSection(profile),
+                    ],
+                  );
+                },
               ),
             );
           },
@@ -533,25 +617,22 @@ class _AccountTabState extends State<AccountTab> {
     );
   }
 
-  Widget _buildProfileHeader(UserProfile profile, String email) {
+  Widget _buildHeroProfile({
+    required UserProfile profile,
+    required String email,
+  }) {
     final firstLetter = profile.nickname.trim().isEmpty
         ? 'U'
         : profile.nickname.trim()[0].toUpperCase();
 
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFF8E2DE2), Color(0xFFEC5AA6)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
+        color: Colors.white,
         borderRadius: BorderRadius.circular(30),
         boxShadow: [
           BoxShadow(
-            color: Colors.purple.withOpacity(0.18),
-            blurRadius: 24,
+            color: Colors.purple.withOpacity(0.08),
+            blurRadius: 22,
             offset: const Offset(0, 12),
           ),
         ],
@@ -559,90 +640,264 @@ class _AccountTabState extends State<AccountTab> {
       child: Column(
         children: [
           Stack(
-            alignment: Alignment.bottomRight,
+            clipBehavior: Clip.none,
+            alignment: Alignment.bottomCenter,
             children: [
-              CircleAvatar(
-                radius: 42,
-                backgroundColor: Colors.white.withOpacity(0.22),
-                backgroundImage: profile.avatarUrl.isNotEmpty
-                    ? NetworkImage(profile.avatarUrl)
-                    : null,
-                child: profile.avatarUrl.isEmpty
-                    ? Text(
-                        firstLetter,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 34,
-                          fontWeight: FontWeight.bold,
-                        ),
+              Container(
+                height: 150,
+                width: double.infinity,
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFF8E2DE2), Color(0xFFEC5AA6)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(30),
+                    topRight: Radius.circular(30),
+                  ),
+                  image: profile.coverUrl.isNotEmpty
+                      ? DecorationImage(
+                          image: NetworkImage(profile.coverUrl),
+                          fit: BoxFit.cover,
+                        )
+                      : null,
+                ),
+                child: profile.coverUrl.isEmpty
+                    ? Stack(
+                        children: [
+                          Positioned(
+                            top: 18,
+                            right: 20,
+                            child: Icon(
+                              Icons.auto_awesome_rounded,
+                              color: Colors.white.withOpacity(0.28),
+                              size: 54,
+                            ),
+                          ),
+                          Positioned(
+                            bottom: 18,
+                            left: 20,
+                            child: Text(
+                              'UniVibe Student Dashboard',
+                              style: TextStyle(
+                                color: Colors.white.withOpacity(0.88),
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ],
                       )
                     : null,
               ),
-              InkWell(
-                onTap: _isUploadingImage ? null : _uploadAvatar,
-                borderRadius: BorderRadius.circular(999),
-                child: Container(
-                  width: 34,
-                  height: 34,
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(999),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.12),
-                        blurRadius: 10,
-                        offset: const Offset(0, 4),
+              Positioned(
+                bottom: -44,
+                child: Stack(
+                  alignment: Alignment.bottomRight,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: const BoxDecoration(
+                        color: Colors.white,
+                        shape: BoxShape.circle,
                       ),
-                    ],
-                  ),
-                  child: _isUploadingImage
-                      ? const Padding(
-                          padding: EdgeInsets.all(8),
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: _primary,
-                          ),
-                        )
-                      : const Icon(
-                          Icons.camera_alt_rounded,
+                      child: CircleAvatar(
+                        radius: 48,
+                        backgroundColor: const Color(0xFFF1EAFF),
+                        backgroundImage: profile.avatarUrl.isNotEmpty
+                            ? NetworkImage(profile.avatarUrl)
+                            : null,
+                        child: profile.avatarUrl.isEmpty
+                            ? Text(
+                                firstLetter,
+                                style: const TextStyle(
+                                  color: _primary,
+                                  fontSize: 34,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              )
+                            : null,
+                      ),
+                    ),
+                    InkWell(
+                      onTap: _showStorageLaterMessage,
+                      borderRadius: BorderRadius.circular(999),
+                      child: Container(
+                        width: 34,
+                        height: 34,
+                        decoration: BoxDecoration(
                           color: _primary,
-                          size: 18,
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(color: Colors.white, width: 3),
                         ),
+                        child: const Icon(
+                          Icons.camera_alt_rounded,
+                          color: Colors.white,
+                          size: 17,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 14),
-          Text(
-            profile.nickname,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 25,
-              fontWeight: FontWeight.bold,
+          const SizedBox(height: 54),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 0, 18, 20),
+            child: Column(
+              children: [
+                Text(
+                  profile.nickname.isEmpty
+                      ? 'Sinh viên UniVibe'
+                      : profile.nickname,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: _darkText,
+                    fontSize: 25,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  email.isEmpty ? 'Chưa có email' : email,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.black45, fontSize: 13),
+                ),
+                const SizedBox(height: 14),
+                Wrap(
+                  alignment: WrapAlignment.center,
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _buildMiniBadge(
+                      icon: Icons.school_rounded,
+                      text: profile.university.isEmpty
+                          ? 'Chưa cập nhật trường'
+                          : profile.university,
+                    ),
+                    _buildMiniBadge(
+                      icon: Icons.menu_book_rounded,
+                      text: profile.major.isEmpty
+                          ? 'Chưa cập nhật ngành'
+                          : profile.major,
+                    ),
+                    _buildMiniBadge(
+                      icon: Icons.calendar_month_rounded,
+                      text: 'Năm ${profile.year}',
+                    ),
+                  ],
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 5),
-          Text(
-            email.isEmpty ? 'Chưa có email' : email,
-            textAlign: TextAlign.center,
-            style: const TextStyle(color: Colors.white70, fontSize: 13),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatsSection(_UserDashboardStats stats) {
+    return _buildSectionCard(
+      title: 'Thống kê cá nhân',
+      icon: Icons.insights_rounded,
+      trailing: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF1EAFF),
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Text(
+          _formatRole(stats.role),
+          style: const TextStyle(
+            color: _primary,
+            fontWeight: FontWeight.w800,
+            fontSize: 12,
           ),
-          const SizedBox(height: 14),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.16),
-              borderRadius: BorderRadius.circular(999),
-              border: Border.all(color: Colors.white.withOpacity(0.22)),
-            ),
-            child: Text(
-              '${profile.major} • Năm ${profile.year}',
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w600,
+        ),
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final crossAxisCount = constraints.maxWidth >= 700 ? 6 : 3;
+
+          return GridView.count(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            crossAxisCount: crossAxisCount,
+            mainAxisSpacing: 10,
+            crossAxisSpacing: 10,
+            childAspectRatio: constraints.maxWidth >= 700 ? 1.05 : 1.12,
+            children: [
+              _buildStatTile(
+                icon: Icons.send_rounded,
+                label: 'Signal',
+                value: stats.sentSignals,
               ),
+              _buildStatTile(
+                icon: Icons.favorite_rounded,
+                label: 'Match',
+                value: stats.matches,
+              ),
+              _buildStatTile(
+                icon: Icons.chat_bubble_rounded,
+                label: 'Chat',
+                value: stats.chatRooms,
+              ),
+              _buildStatTile(
+                icon: Icons.forum_rounded,
+                label: 'Confess',
+                value: stats.confessions,
+              ),
+              _buildStatTile(
+                icon: Icons.auto_awesome_rounded,
+                label: 'Moment',
+                value: stats.moments,
+              ),
+              _buildStatTile(
+                icon: Icons.storefront_rounded,
+                label: 'Market',
+                value: stats.marketPosts,
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildStatTile({
+    required IconData icon,
+    required String label,
+    required int value,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF9F7FF),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFFEDE7FF)),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, color: _primary, size: 22),
+          const SizedBox(height: 8),
+          Text(
+            value.toString(),
+            style: const TextStyle(
+              color: _darkText,
+              fontWeight: FontWeight.w900,
+              fontSize: 20,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Colors.black54,
+              fontWeight: FontWeight.w600,
+              fontSize: 12,
             ),
           ),
         ],
@@ -651,22 +906,11 @@ class _AccountTabState extends State<AccountTab> {
   }
 
   Widget _buildInfoCard(UserProfile profile) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(18),
-      decoration: _cardDecoration(),
+    return _buildSectionCard(
+      title: 'Thông tin sinh viên',
+      icon: Icons.account_circle_rounded,
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Thông tin tài khoản',
-            style: TextStyle(
-              color: _darkText,
-              fontSize: 19,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 14),
           _buildInfoRow(
             icon: Icons.school_rounded,
             label: 'Trường',
@@ -687,13 +931,274 @@ class _AccountTabState extends State<AccountTab> {
             label: 'Giới tính',
             value: profile.gender.isEmpty ? 'Chưa cập nhật' : profile.gender,
           ),
-          const SizedBox(height: 8),
-          const Divider(),
-          const SizedBox(height: 8),
-          Text(
-            profile.bio.isEmpty ? 'Chưa có bio.' : profile.bio,
-            style: const TextStyle(color: Colors.black87, height: 1.45),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildQuickActions(UserProfile profile) {
+    return _buildSectionCard(
+      title: 'Thao tác nhanh',
+      icon: Icons.bolt_rounded,
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: _buildQuickActionButton(
+                  icon: Icons.edit_rounded,
+                  label: 'Sửa hồ sơ',
+                  color: _primary,
+                  onTap: () => _showEditProfileDialog(profile),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _buildQuickActionButton(
+                  icon: Icons.chat_bubble_rounded,
+                  label: 'Vào Chat',
+                  color: const Color(0xFF00A6A6),
+                  onTap: () => _goTo(4),
+                ),
+              ),
+            ],
           ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: _buildQuickActionButton(
+                  icon: Icons.storefront_rounded,
+                  label: 'Đăng Market',
+                  color: const Color(0xFFFF8A00),
+                  onTap: () => _goTo(3),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _buildQuickActionButton(
+                  icon: Icons.forum_rounded,
+                  label: 'Confession',
+                  color: const Color(0xFF8E2DE2),
+                  onTap: () => _goTo(1),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: _buildQuickActionButton(
+                  icon: Icons.auto_awesome_rounded,
+                  label: 'UniMoment',
+                  color: _pink,
+                  onTap: () => _goTo(2),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _buildQuickActionButton(
+                  icon: Icons.logout_rounded,
+                  label: 'Đăng xuất',
+                  color: const Color(0xFFE53935),
+                  onTap: _showLogoutConfirmDialog,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildQuickActionButton({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(18),
+      child: Container(
+        height: 58,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: color.withOpacity(0.18)),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: color, size: 20),
+            const SizedBox(width: 7),
+            Flexible(
+              child: Text(
+                label,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: color,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 13,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFeaturedImagesSection(UserProfile profile) {
+    return _buildSectionCard(
+      title: 'Ảnh nổi bật',
+      icon: Icons.photo_library_rounded,
+      trailing: TextButton.icon(
+        onPressed: _showStorageLaterMessage,
+        icon: const Icon(Icons.add_photo_alternate_rounded, size: 18),
+        label: const Text('Thêm'),
+      ),
+      child: profile.featuredImageUrls.isEmpty
+          ? Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF9F7FF),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: const Color(0xFFEDE7FF)),
+              ),
+              child: const Text(
+                'Chưa có ảnh nổi bật. Sau khi bật Firebase Storage, mục này sẽ dùng để show ảnh cá nhân/hoạt động nổi bật.',
+                style: TextStyle(color: Colors.black54, height: 1.4),
+              ),
+            )
+          : GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: profile.featuredImageUrls.length,
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 3,
+                crossAxisSpacing: 8,
+                mainAxisSpacing: 8,
+              ),
+              itemBuilder: (context, index) {
+                final imageUrl = profile.featuredImageUrls[index];
+
+                return ClipRRect(
+                  borderRadius: BorderRadius.circular(16),
+                  child: Image.network(
+                    imageUrl,
+                    width: double.infinity,
+                    height: double.infinity,
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) {
+                      return Container(
+                        color: const Color(0xFFF1EAFF),
+                        child: const Icon(
+                          Icons.broken_image_rounded,
+                          color: _primary,
+                        ),
+                      );
+                    },
+                  ),
+                );
+              },
+            ),
+    );
+  }
+
+  Widget _buildTagSection({
+    required String title,
+    required IconData icon,
+    required List items,
+    required String emptyText,
+  }) {
+    return _buildSectionCard(
+      title: title,
+      icon: icon,
+      child: items.isEmpty
+          ? Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF9F7FF),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Text(
+                emptyText,
+                style: const TextStyle(color: Colors.black54, height: 1.4),
+              ),
+            )
+          : Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: items.map((item) {
+                return Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 13,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF1EAFF),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: Colors.purple.shade100),
+                  ),
+                  child: Text(
+                    item.toString(),
+                    style: const TextStyle(
+                      color: _darkText,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+    );
+  }
+
+  Widget _buildSectionCard({
+    required String title,
+    required IconData icon,
+    required Widget child,
+    Widget? trailing,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: _cardDecoration(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF1EAFF),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(icon, color: _primary, size: 21),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    color: _darkText,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              if (trailing != null) trailing,
+            ],
+          ),
+          const SizedBox(height: 15),
+          child,
         ],
       ),
     );
@@ -730,7 +1235,7 @@ class _AccountTabState extends State<AccountTab> {
               textAlign: TextAlign.right,
               style: const TextStyle(
                 color: _darkText,
-                fontWeight: FontWeight.w700,
+                fontWeight: FontWeight.w800,
               ),
             ),
           ),
@@ -739,269 +1244,25 @@ class _AccountTabState extends State<AccountTab> {
     );
   }
 
-  Widget _buildTagSection({
-    required String title,
-    required IconData icon,
-    required List<String> items,
-  }) {
+  Widget _buildMiniBadge({required IconData icon, required String text}) {
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(18),
-      decoration: _cardDecoration(),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(icon, color: _primary, size: 22),
-              const SizedBox(width: 8),
-              Text(
-                title,
-                style: const TextStyle(
-                  color: _darkText,
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 13),
-          if (items.isEmpty)
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF7F3FF),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: const Text(
-                'Chưa cập nhật mục này.',
-                style: TextStyle(color: Colors.black54),
-              ),
-            )
-          else
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: items.map((item) {
-                return Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 13,
-                    vertical: 8,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF1EAFF),
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(color: Colors.purple.shade100),
-                  ),
-                  child: Text(
-                    item,
-                    style: const TextStyle(
-                      color: _darkText,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13,
-                    ),
-                  ),
-                );
-              }).toList(),
-            ),
-        ],
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF7F3FF),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: const Color(0xFFEDE7FF)),
       ),
-    );
-  }
-
-  Widget _buildFeaturedImagesSection(UserProfile profile) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(18),
-      decoration: _cardDecoration(),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Row(
-            children: [
-              const Icon(
-                Icons.photo_library_rounded,
-                color: _primary,
-                size: 22,
-              ),
-              const SizedBox(width: 8),
-              const Expanded(
-                child: Text(
-                  'Ảnh nổi bật',
-                  style: TextStyle(
-                    color: _darkText,
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-              TextButton.icon(
-                onPressed: _isUploadingImage ? null : _addFeaturedImage,
-                icon: const Icon(Icons.add_photo_alternate_rounded, size: 18),
-                label: const Text('Thêm'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 13),
-          if (profile.featuredImageUrls.isEmpty)
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF7F3FF),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: const Text(
-                'Chưa có ảnh nổi bật. Thêm vài ảnh để hồ sơ nhìn xịn hơn.',
-                style: TextStyle(color: Colors.black54, height: 1.35),
-              ),
-            )
-          else
-            GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: profile.featuredImageUrls.length,
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 3,
-                crossAxisSpacing: 8,
-                mainAxisSpacing: 8,
-              ),
-              itemBuilder: (context, index) {
-                final imageUrl = profile.featuredImageUrls[index];
-
-                return Stack(
-                  children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(16),
-                      child: Image.network(
-                        imageUrl,
-                        width: double.infinity,
-                        height: double.infinity,
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) {
-                          return Container(
-                            color: const Color(0xFFF1EAFF),
-                            child: const Icon(
-                              Icons.broken_image_rounded,
-                              color: _primary,
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                    Positioned(
-                      top: 5,
-                      right: 5,
-                      child: InkWell(
-                        onTap: () => _removeFeaturedImage(imageUrl),
-                        borderRadius: BorderRadius.circular(999),
-                        child: Container(
-                          width: 26,
-                          height: 26,
-                          decoration: BoxDecoration(
-                            color: Colors.black.withOpacity(0.55),
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          child: const Icon(
-                            Icons.close_rounded,
-                            color: Colors.white,
-                            size: 17,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                );
-              },
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildActionCard(UserProfile profile) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(18),
-      decoration: _cardDecoration(),
-      child: Column(
-        children: [
-          SizedBox(
-            width: double.infinity,
-            height: 52,
-            child: ElevatedButton.icon(
-              onPressed: () => _showEditProfileDialog(profile),
-              icon: const Icon(Icons.edit_rounded),
-              label: const Text('Chỉnh sửa hồ sơ'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _primary,
-                foregroundColor: Colors.white,
-                elevation: 0,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(18),
-                ),
-              ),
-            ),
-          ),
-
-          const SizedBox(height: 12),
-
-          FutureBuilder<bool>(
-            future: AdminService.hasAdminAccess(),
-            builder: (context, snapshot) {
-              final canOpenAdmin = snapshot.data == true;
-
-              if (!canOpenAdmin) {
-                return const SizedBox.shrink();
-              }
-
-              return Column(
-                children: [
-                  SizedBox(
-                    width: double.infinity,
-                    height: 52,
-                    child: ElevatedButton.icon(
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => const AdminDashboardScreen(),
-                          ),
-                        );
-                      },
-                      icon: const Icon(Icons.admin_panel_settings_rounded),
-                      label: const Text('Admin Dashboard'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF2D1B69),
-                        foregroundColor: Colors.white,
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(18),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                ],
-              );
-            },
-          ),
-
-          SizedBox(
-            width: double.infinity,
-            height: 52,
-            child: OutlinedButton.icon(
-              onPressed: _showLogoutConfirmDialog,
-              icon: const Icon(Icons.logout_rounded),
-              label: const Text('Đăng xuất'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: const Color(0xFFE53935),
-                side: const BorderSide(color: Color(0xFFFFCDD2)),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(18),
-                ),
-              ),
+          Icon(icon, color: _primary, size: 16),
+          const SizedBox(width: 6),
+          Text(
+            text,
+            style: const TextStyle(
+              color: _darkText,
+              fontWeight: FontWeight.w700,
+              fontSize: 12,
             ),
           ),
         ],
@@ -1045,7 +1306,7 @@ class _AccountTabState extends State<AccountTab> {
               ),
               const SizedBox(height: 16),
               ElevatedButton(
-                onPressed: _reloadProfile,
+                onPressed: _reloadData,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: _primary,
                   foregroundColor: Colors.white,
@@ -1096,7 +1357,7 @@ class _AccountTabState extends State<AccountTab> {
               ),
               const SizedBox(height: 16),
               ElevatedButton(
-                onPressed: _reloadProfile,
+                onPressed: _reloadData,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: _primary,
                   foregroundColor: Colors.white,
@@ -1145,6 +1406,54 @@ class _AccountTabState extends State<AccountTab> {
           ),
         ],
       ),
+    );
+  }
+
+  String _formatRole(String role) {
+    switch (role) {
+      case 'admin':
+        return 'Admin';
+      case 'moderator':
+        return 'Moderator';
+      case 'clubLeader':
+        return 'CLB Leader';
+      case 'eventManager':
+        return 'Event Manager';
+      case 'student':
+      default:
+        return 'Student';
+    }
+  }
+}
+
+class _UserDashboardStats {
+  final int sentSignals;
+  final int matches;
+  final int chatRooms;
+  final int confessions;
+  final int moments;
+  final int marketPosts;
+  final String role;
+
+  const _UserDashboardStats({
+    required this.sentSignals,
+    required this.matches,
+    required this.chatRooms,
+    required this.confessions,
+    required this.moments,
+    required this.marketPosts,
+    required this.role,
+  });
+
+  factory _UserDashboardStats.empty() {
+    return const _UserDashboardStats(
+      sentSignals: 0,
+      matches: 0,
+      chatRooms: 0,
+      confessions: 0,
+      moments: 0,
+      marketPosts: 0,
+      role: 'student',
     );
   }
 }

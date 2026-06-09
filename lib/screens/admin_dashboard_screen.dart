@@ -11,13 +11,14 @@ class AdminDashboardScreen extends StatefulWidget {
   State<AdminDashboardScreen> createState() => _AdminDashboardScreenState();
 }
 
-class _AdminDashboardScreenState extends State<AdminDashboardScreen>
-    with SingleTickerProviderStateMixin {
+class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   static const Color _primary = Color(0xFF7B61FF);
   static const Color _darkText = Color(0xFF2D1B69);
   static const Color _bg = Color(0xFFF7F3FF);
 
-  late final TabController _tabController;
+  late final Future<bool> _adminAccessFuture;
+
+  int _selectedTabIndex = 0;
 
   final List<_AdminTabItem> _tabs = const [
     _AdminTabItem(title: 'Tổng quan', icon: Icons.dashboard_rounded),
@@ -33,17 +34,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: _tabs.length, vsync: this);
-  }
-
-  @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
+    _adminAccessFuture = AdminService.hasAdminAccess();
   }
 
   void _showSnack(String message) {
     if (!mounted) return;
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
     );
@@ -61,7 +57,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<bool>(
-      future: AdminService.hasAdminAccess(),
+      future: _adminAccessFuture,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
@@ -149,41 +145,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
               ],
             ),
             bottom: PreferredSize(
-              preferredSize: const Size.fromHeight(74),
-              child: Container(
-                alignment: Alignment.centerLeft,
-                padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                child: TabBar(
-                  controller: _tabController,
-                  isScrollable: true,
-                  tabAlignment: TabAlignment.start,
-                  indicator: BoxDecoration(
-                    color: const Color(0xFFEDE7FF),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  indicatorSize: TabBarIndicatorSize.tab,
-                  dividerColor: Colors.transparent,
-                  labelColor: _primary,
-                  unselectedLabelColor: Colors.black54,
-                  labelStyle: const TextStyle(fontWeight: FontWeight.w800),
-                  tabs: _tabs.map((tab) {
-                    return Tab(
-                      height: 44,
-                      child: Row(
-                        children: [
-                          Icon(tab.icon, size: 19),
-                          const SizedBox(width: 7),
-                          Text(tab.title),
-                        ],
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ),
+              preferredSize: const Size.fromHeight(82),
+              child: _buildAdminTabSelector(),
             ),
           ),
-          body: TabBarView(
-            controller: _tabController,
+          body: IndexedStack(
+            index: _selectedTabIndex,
             children: [
               _buildOverviewTab(),
               _buildReportsTab(),
@@ -193,6 +160,81 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
           ),
         );
       },
+    );
+  }
+
+  Widget _buildAdminTabSelector() {
+    return Container(
+      width: double.infinity,
+      color: Colors.white,
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 14),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: List.generate(_tabs.length, (index) {
+            final tab = _tabs[index];
+            final isSelected = _selectedTabIndex == index;
+
+            return _buildAdminTabButton(
+              label: tab.title,
+              icon: tab.icon,
+              isSelected: isSelected,
+              onTap: () {
+                if (_selectedTabIndex == index) return;
+
+                setState(() {
+                  _selectedTabIndex = index;
+                });
+              },
+            );
+          }),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAdminTabButton({
+    required String label,
+    required IconData icon,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    final Color selectedBg = const Color(0xFFEDE7FF);
+    final Color normalText = Colors.grey.shade700;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 6),
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          onTap: onTap,
+          behavior: HitTestBehavior.translucent,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 160),
+            curve: Curves.easeOut,
+            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 16),
+            decoration: BoxDecoration(
+              color: isSelected ? selectedBg : Colors.transparent,
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 25, color: isSelected ? _primary : normalText),
+                const SizedBox(width: 11),
+                Text(
+                  label,
+                  style: TextStyle(
+                    color: isSelected ? _primary : normalText,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -434,7 +476,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
             ),
           ),
         ),
-
         Expanded(
           child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
             stream: AdminService.reportsStream(),
@@ -657,7 +698,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
             ),
           ),
         ),
-
         Expanded(
           child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
             stream: AdminService.usersStream(),
@@ -870,6 +910,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
             ],
             onChanged: (value) {
               if (value == null) return;
+
               setState(() {
                 _contentType = value;
               });
@@ -929,6 +970,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
         : 'Nội dung không có tiêu đề';
 
     final status = data['status']?.toString() ?? 'active';
+
     final authorId =
         data['authorId']?.toString() ??
         data['sellerId']?.toString() ??
@@ -971,7 +1013,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
               ],
             ),
             const SizedBox(height: 12),
-
             Text(
               title,
               maxLines: 4,
@@ -983,7 +1024,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                 height: 1.35,
               ),
             ),
-
             if (price != null || category.isNotEmpty) ...[
               const SizedBox(height: 8),
               Wrap(
@@ -1003,13 +1043,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                 ],
               ),
             ],
-
             const SizedBox(height: 10),
             _buildMiniInfo('ID', doc.id),
             _buildMiniInfo('Author', authorId.isEmpty ? 'Không rõ' : authorId),
-
             const SizedBox(height: 12),
-
             Row(
               children: [
                 Expanded(
@@ -1139,6 +1176,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                                   await onConfirm(noteController.text.trim());
 
                                   if (!mounted) return;
+
                                   Navigator.pop(bottomSheetContext);
                                   _showSnack('Đã xử lý');
                                 } catch (e) {
@@ -1252,6 +1290,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                     }).toList(),
                     onChanged: (value) {
                       if (value == null) return;
+
                       setSheetState(() {
                         selectedRole = value;
                       });
@@ -1275,6 +1314,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                                 );
 
                                 if (!mounted) return;
+
                                 Navigator.pop(bottomSheetContext);
                                 _showSnack('Đã đổi role thành $selectedRole');
                               } catch (e) {
@@ -1497,6 +1537,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
   String _formatTimestamp(dynamic value) {
     if (value is Timestamp) {
       final date = value.toDate();
+
       return '${date.day.toString().padLeft(2, '0')}/'
           '${date.month.toString().padLeft(2, '0')}/'
           '${date.year}';
@@ -1551,7 +1592,7 @@ class _GuideRow extends StatelessWidget {
               color: const Color(0xFFEDE7FF),
               borderRadius: BorderRadius.circular(14),
             ),
-            child: Icon(icon, color: Color(0xFF7B61FF), size: 20),
+            child: Icon(icon, color: const Color(0xFF7B61FF), size: 20),
           ),
           const SizedBox(width: 12),
           Expanded(

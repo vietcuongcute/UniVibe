@@ -22,15 +22,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   int _currentIndex = 0;
 
-  final List<Widget> _tabs = const [
-    VibeTab(),
-    ConfessionTab(),
-    UniMomentTab(),
-    MarketTab(),
-    ChatTab(),
-    AccountTab(),
-  ];
-
   final List<String> _titles = const [
     'Vibe',
     'Confession',
@@ -46,15 +37,34 @@ class _HomeScreenState extends State<HomeScreen> {
     'Khoảnh khắc 24h của trường',
     'Mua bán đồ sinh viên',
     'Nhắn tin với người đã match',
-    'Quản lý hồ sơ',
+    'Dashboard cá nhân sinh viên',
   ];
+
+  void _goToTab(int index) {
+    if (index < 0 || index > 5) return;
+
+    setState(() {
+      _currentIndex = index;
+    });
+  }
+
+  List<Widget> _buildTabs() {
+    return [
+      const VibeTab(),
+      const ConfessionTab(),
+      const UniMomentTab(),
+      const MarketTab(),
+      const ChatTab(),
+      AccountTab(onNavigate: _goToTab),
+    ];
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _bg,
       appBar: _buildAppBar(),
-      body: IndexedStack(index: _currentIndex, children: _tabs),
+      body: IndexedStack(index: _currentIndex, children: _buildTabs()),
       bottomNavigationBar: _buildBottomNavigation(),
     );
   }
@@ -116,11 +126,7 @@ class _HomeScreenState extends State<HomeScreen> {
           indicatorColor: _softPurple,
           labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
           animationDuration: const Duration(milliseconds: 250),
-          onDestinationSelected: (index) {
-            setState(() {
-              _currentIndex = index;
-            });
-          },
+          onDestinationSelected: _goToTab,
           destinations: const [
             NavigationDestination(
               icon: Icon(Icons.favorite_border_rounded),
