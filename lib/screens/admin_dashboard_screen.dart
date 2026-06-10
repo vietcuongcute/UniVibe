@@ -2,7 +2,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import 'admin_content_detail_screen.dart';
+import 'auth_gate.dart';
+
 import '../services/admin_service.dart';
+import '../services/chat_service.dart';
 
 class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({super.key});
@@ -16,7 +19,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   static const Color _secondary = Color(0xFFEC5AA6);
   static const Color _darkText = Color(0xFF2D1B69);
   static const Color _bg = Color(0xFFF7F3FF);
-  static const Color _cardBg = Colors.white;
 
   late final Future<bool> _adminAccessFuture;
 
@@ -28,7 +30,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   final List<_AdminTabItem> _tabs = const [
     _AdminTabItem(
       title: 'Tổng quan',
-      subtitle: 'Số liệu nhanh',
+      subtitle: 'Số liệu hệ thống',
       icon: Icons.dashboard_rounded,
     ),
     _AdminTabItem(
@@ -38,7 +40,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     ),
     _AdminTabItem(
       title: 'Users',
-      subtitle: 'Quản lý sinh viên',
+      subtitle: 'Quản lý tài khoản',
       icon: Icons.people_alt_rounded,
     ),
     _AdminTabItem(
@@ -63,6 +65,66 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       ),
+    );
+  }
+
+  Future<void> _logout() async {
+    try {
+      ChatService.chatRoomsNotifier.value = [];
+      await AdminService.signOut();
+
+      if (!mounted) return;
+
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const AuthGate()),
+        (route) => false,
+      );
+    } catch (e) {
+      _showSnack('Đăng xuất thất bại: $e');
+    }
+  }
+
+  void _showLogoutDialog() {
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          backgroundColor: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+          ),
+          title: const Text(
+            'Đăng xuất admin?',
+            style: TextStyle(color: _darkText, fontWeight: FontWeight.w900),
+          ),
+          content: const Text(
+            'Bạn có chắc muốn đăng xuất khỏi UniVibe Admin Center không?',
+            style: TextStyle(color: Colors.black54, height: 1.4),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Hủy'),
+            ),
+            ElevatedButton.icon(
+              onPressed: () async {
+                Navigator.pop(dialogContext);
+                await _logout();
+              },
+              icon: const Icon(Icons.logout_rounded, size: 18),
+              label: const Text('Đăng xuất'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFE53935),
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -99,7 +161,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             child: Column(
               children: [
                 _buildHeader(),
-                _buildAdminTabSelector(),
+                _buildTabSelector(),
                 Expanded(
                   child: IndexedStack(
                     index: _selectedTabIndex,
@@ -127,6 +189,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         backgroundColor: Colors.white,
         foregroundColor: _darkText,
         elevation: 0,
+        actions: [
+          IconButton(
+            onPressed: _showLogoutDialog,
+            tooltip: 'Đăng xuất',
+            icon: const Icon(Icons.logout_rounded),
+          ),
+        ],
       ),
       body: Center(
         child: Padding(
@@ -179,89 +248,165 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
-          colors: [Color(0xFF7B61FF), Color(0xFFEC5AA6)],
+          colors: [_primary, _secondary],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        borderRadius: BorderRadius.circular(30),
+        borderRadius: BorderRadius.circular(32),
         boxShadow: [
           BoxShadow(
-            color: _primary.withOpacity(0.22),
-            blurRadius: 28,
+            color: _primary.withOpacity(0.24),
+            blurRadius: 30,
             offset: const Offset(0, 14),
           ),
         ],
       ),
-      child: Row(
-        children: [
-          Container(
-            width: 58,
-            height: 58,
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.18),
-              borderRadius: BorderRadius.circular(22),
-              border: Border.all(color: Colors.white.withOpacity(0.26)),
-            ),
-            child: const Icon(
-              Icons.admin_panel_settings_rounded,
-              color: Colors.white,
-              size: 32,
-            ),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'UniVibe Admin Center',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 23,
-                    fontWeight: FontWeight.w900,
-                    height: 1.1,
-                  ),
+      child: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+        stream: AdminService.currentUserStream(),
+        builder: (context, snapshot) {
+          final data = snapshot.data?.data() ?? {};
+
+          final nickname =
+              data['nickname']?.toString().trim().isNotEmpty == true
+              ? data['nickname'].toString()
+              : 'Admin UniVibe';
+
+          final role = data['role']?.toString() ?? 'admin';
+          final email = data['email']?.toString() ?? '';
+          final avatarUrl = data['avatarUrl']?.toString() ?? '';
+
+          final firstLetter = nickname.trim().isEmpty
+              ? 'A'
+              : nickname.trim()[0].toUpperCase();
+
+          return Row(
+            children: [
+              CircleAvatar(
+                radius: 31,
+                backgroundColor: Colors.white.withOpacity(0.22),
+                backgroundImage: avatarUrl.isNotEmpty
+                    ? NetworkImage(avatarUrl)
+                    : null,
+                child: avatarUrl.isEmpty
+                    ? Text(
+                        firstLetter,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 24,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      )
+                    : null,
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'UniVibe Admin Center',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 23,
+                        fontWeight: FontWeight.w900,
+                        height: 1.1,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      '${currentTab.title} • ${currentTab.subtitle}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.84),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        _buildHeaderPill(
+                          icon: Icons.person_rounded,
+                          text: nickname,
+                        ),
+                        _buildHeaderPill(
+                          icon: Icons.verified_user_rounded,
+                          text: role,
+                        ),
+                        if (email.isNotEmpty)
+                          _buildHeaderPill(
+                            icon: Icons.mail_rounded,
+                            text: email,
+                          ),
+                      ],
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 5),
-                Text(
-                  '${currentTab.title} • ${currentTab.subtitle}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.82),
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
+              ),
+              const SizedBox(width: 10),
+              _buildLogoutButton(),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildLogoutButton() {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: _showLogoutDialog,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.16),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: Colors.white.withOpacity(0.26)),
           ),
-          const SizedBox(width: 10),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.16),
-              borderRadius: BorderRadius.circular(999),
-              border: Border.all(color: Colors.white.withOpacity(0.22)),
-            ),
-            child: const Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  Icons.verified_user_rounded,
+          child: const Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.logout_rounded, color: Colors.white, size: 18),
+              SizedBox(width: 7),
+              Text(
+                'Đăng xuất',
+                style: TextStyle(
                   color: Colors.white,
-                  size: 17,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 13,
                 ),
-                SizedBox(width: 6),
-                Text(
-                  'Admin',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 12,
-                  ),
-                ),
-              ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHeaderPill({required IconData icon, required String text}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: Colors.white.withOpacity(0.18)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: Colors.white, size: 15),
+          const SizedBox(width: 5),
+          Text(
+            text,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w800,
+              fontSize: 12,
             ),
           ),
         ],
@@ -269,7 +414,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
-  Widget _buildAdminTabSelector() {
+  Widget _buildTabSelector() {
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.fromLTRB(18, 0, 18, 12),
@@ -292,7 +437,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             final tab = _tabs[index];
             final isSelected = _selectedTabIndex == index;
 
-            return _buildAdminTabButton(
+            return _buildTabButton(
               label: tab.title,
               icon: tab.icon,
               isSelected: isSelected,
@@ -310,7 +455,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
-  Widget _buildAdminTabButton({
+  Widget _buildTabButton({
     required String label,
     required IconData icon,
     required bool isSelected,
@@ -501,43 +646,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
-  Widget _buildQuickAdminGuide() {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: _cardDecoration(),
-      child: const Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _SectionTitle(
-            icon: Icons.checklist_rounded,
-            title: 'Quy trình kiểm duyệt nhanh',
-          ),
-          SizedBox(height: 14),
-          _GuideRow(
-            icon: Icons.flag_rounded,
-            title: '1. Xem report mới',
-            subtitle: 'Ưu tiên xử lý report có trạng thái pending.',
-          ),
-          _GuideRow(
-            icon: Icons.visibility_off_rounded,
-            title: '2. Ẩn nội dung vi phạm',
-            subtitle: 'Ẩn bài đăng trước nếu nội dung có rủi ro.',
-          ),
-          _GuideRow(
-            icon: Icons.check_circle_rounded,
-            title: '3. Đánh dấu đã xử lý',
-            subtitle: 'Resolve nếu report đúng, reject nếu report sai.',
-          ),
-          _GuideRow(
-            icon: Icons.people_alt_rounded,
-            title: '4. Quản lý role user',
-            subtitle: 'Chỉ admin mới nên đổi role cho tài khoản khác.',
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildStatCard({
     required String title,
     required String value,
@@ -596,6 +704,43 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 ),
               ],
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildQuickAdminGuide() {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: _cardDecoration(),
+      child: const Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _SectionTitle(
+            icon: Icons.checklist_rounded,
+            title: 'Quy trình kiểm duyệt nhanh',
+          ),
+          SizedBox(height: 14),
+          _GuideRow(
+            icon: Icons.flag_rounded,
+            title: '1. Xem report mới',
+            subtitle: 'Ưu tiên xử lý report có trạng thái pending.',
+          ),
+          _GuideRow(
+            icon: Icons.visibility_off_rounded,
+            title: '2. Ẩn nội dung vi phạm',
+            subtitle: 'Ẩn bài đăng trước nếu nội dung có rủi ro.',
+          ),
+          _GuideRow(
+            icon: Icons.check_circle_rounded,
+            title: '3. Đánh dấu đã xử lý',
+            subtitle: 'Resolve nếu report đúng, reject nếu report sai.',
+          ),
+          _GuideRow(
+            icon: Icons.people_alt_rounded,
+            title: '4. Quản lý role user',
+            subtitle: 'Chỉ admin mới nên đổi role cho tài khoản khác.',
           ),
         ],
       ),
@@ -1848,7 +1993,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   BoxDecoration _cardDecoration() {
     return BoxDecoration(
-      color: _cardBg,
+      color: Colors.white,
       borderRadius: BorderRadius.circular(26),
       border: Border.all(color: Colors.white.withOpacity(0.7)),
       boxShadow: [
