@@ -15,6 +15,8 @@ class AdminService {
     'admin',
   ];
 
+  static const List<String> validUserStatus = ['active', 'blocked'];
+
   static String? get currentUid => _auth.currentUser?.uid;
 
   static CollectionReference<Map<String, dynamic>> get usersRef {
@@ -45,23 +47,35 @@ class AdminService {
     final doc = await usersRef.doc(uid).get();
     final data = doc.data();
 
-    return data?['role']?.toString() ?? 'student';
+    final role = data?['role']?.toString().trim();
+
+    if (role == null || role.isEmpty) {
+      return 'student';
+    }
+
+    return role;
   }
 
   static Future<bool> hasAdminAccess() async {
     final role = await getCurrentRole();
-
     return role == 'admin' || role == 'moderator';
   }
 
   static Future<bool> isAdmin() async {
     final role = await getCurrentRole();
-
     return role == 'admin';
   }
 
-  static Stream<QuerySnapshot<Map<String, dynamic>>> reportsStream() {
-    return reportsRef.orderBy('createdAt', descending: true).snapshots();
+  static Stream<QuerySnapshot<Map<String, dynamic>>> reportsStream({
+    String status = 'all',
+  }) {
+    Query<Map<String, dynamic>> query = reportsRef;
+
+    if (status != 'all') {
+      query = query.where('status', isEqualTo: status);
+    }
+
+    return query.orderBy('createdAt', descending: true).snapshots();
   }
 
   static Stream<QuerySnapshot<Map<String, dynamic>>> usersStream() {
@@ -72,11 +86,7 @@ class AdminService {
     required String reportId,
     String adminNote = '',
   }) async {
-    final allowed = await hasAdminAccess();
-
-    if (!allowed) {
-      throw Exception('Bạn không có quyền xử lý report');
-    }
+    await _requireAdminOrModerator();
 
     final uid = currentUid;
 
@@ -98,11 +108,7 @@ class AdminService {
     required String reportId,
     String adminNote = '',
   }) async {
-    final allowed = await hasAdminAccess();
-
-    if (!allowed) {
-      throw Exception('Bạn không có quyền xử lý report');
-    }
+    await _requireAdminOrModerator();
 
     final uid = currentUid;
 
@@ -126,11 +132,7 @@ class AdminService {
     required String targetId,
     String adminNote = '',
   }) async {
-    final allowed = await hasAdminAccess();
-
-    if (!allowed) {
-      throw Exception('Bạn không có quyền ẩn nội dung');
-    }
+    await _requireAdminOrModerator();
 
     final uid = currentUid;
 
@@ -138,19 +140,31 @@ class AdminService {
       throw Exception('User chưa đăng nhập');
     }
 
-    final collectionName = getCollectionNameFromTargetType(targetType);
+    final cleanTargetType = targetType.trim();
+    final cleanTargetId = targetId.trim();
 
-    if (collectionName == null) {
-      throw Exception('Chưa hỗ trợ ẩn targetType: $targetType');
+    if (cleanTargetId.isEmpty) {
+      throw Exception('Thiếu targetId');
     }
 
-    if (targetId.trim().isEmpty) {
-      throw Exception('Thiếu targetId');
+    if (cleanTargetType == 'user' || cleanTargetType == 'users') {
+      await blockReportedUser(
+        reportId: reportId,
+        userId: cleanTargetId,
+        adminNote: adminNote,
+      );
+      return;
+    }
+
+    final collectionName = getCollectionNameFromTargetType(cleanTargetType);
+
+    if (collectionName == null) {
+      throw Exception('Chưa hỗ trợ ẩn loại nội dung: $targetType');
     }
 
     final batch = _db.batch();
 
-    final targetRef = _db.collection(collectionName).doc(targetId);
+    final targetRef = _db.collection(collectionName).doc(cleanTargetId);
     final reportRef = reportsRef.doc(reportId);
 
     batch.update(targetRef, {
@@ -172,6 +186,111 @@ class AdminService {
     await batch.commit();
   }
 
+  static Future<void> restoreReportedContent({
+    required String reportId,
+    required String targetType,
+    required String targetId,
+    String adminNote = '',
+  }) async {
+    await _requireAdminOrModerator();
+
+    final uid = currentUid;
+
+    if (uid == null) {
+      throw Exception('User chưa đăng nhập');
+    }
+
+    final cleanTargetType = targetType.trim();
+    final cleanTargetId = targetId.trim();
+
+    if (cleanTargetId.isEmpty) {
+      throw Exception('Thiếu targetId');
+    }
+
+    if (cleanTargetType == 'user' || cleanTargetType == 'users') {
+      final batch = _db.batch();
+
+      batch.update(usersRef.doc(cleanTargetId), {
+        'status': 'active',
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      batch.update(reportsRef.doc(reportId), {
+        'status': 'resolved',
+        'action': 'restored_user',
+        'adminNote': adminNote.trim(),
+        'handledBy': uid,
+        'handledAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      await batch.commit();
+      return;
+    }
+
+    final collectionName = getCollectionNameFromTargetType(cleanTargetType);
+
+    if (collectionName == null) {
+      throw Exception('Chưa hỗ trợ khôi phục loại nội dung: $targetType');
+    }
+
+    final batch = _db.batch();
+
+    batch.update(_db.collection(collectionName).doc(cleanTargetId), {
+      'status': 'active',
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+
+    batch.update(reportsRef.doc(reportId), {
+      'status': 'resolved',
+      'action': 'restored_content',
+      'adminNote': adminNote.trim(),
+      'handledBy': uid,
+      'handledAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+
+    await batch.commit();
+  }
+
+  static Future<void> blockReportedUser({
+    required String reportId,
+    required String userId,
+    String adminNote = '',
+  }) async {
+    await _requireAdminOrModerator();
+
+    final uid = currentUid;
+
+    if (uid == null) {
+      throw Exception('User chưa đăng nhập');
+    }
+
+    if (userId.trim().isEmpty) {
+      throw Exception('Thiếu userId');
+    }
+
+    final batch = _db.batch();
+
+    batch.update(usersRef.doc(userId.trim()), {
+      'status': 'blocked',
+      'blockedBy': uid,
+      'blockedAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+
+    batch.update(reportsRef.doc(reportId), {
+      'status': 'resolved',
+      'action': 'blocked_user',
+      'adminNote': adminNote.trim(),
+      'handledBy': uid,
+      'handledAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+
+    await batch.commit();
+  }
+
   static Future<void> updateUserRole({
     required String userId,
     required String role,
@@ -182,12 +301,14 @@ class AdminService {
       throw Exception('Chỉ admin mới được gán role');
     }
 
-    if (!validRoles.contains(role)) {
+    final cleanRole = role.trim();
+
+    if (!validRoles.contains(cleanRole)) {
       throw Exception('Role không hợp lệ');
     }
 
     await usersRef.doc(userId).update({
-      'role': role,
+      'role': cleanRole,
       'updatedAt': FieldValue.serverTimestamp(),
     });
   }
@@ -202,12 +323,14 @@ class AdminService {
       throw Exception('Chỉ admin mới được khóa/mở khóa user');
     }
 
-    if (!['active', 'blocked'].contains(status)) {
+    final cleanStatus = status.trim();
+
+    if (!validUserStatus.contains(cleanStatus)) {
       throw Exception('Status không hợp lệ');
     }
 
     await usersRef.doc(userId).update({
-      'status': status,
+      'status': cleanStatus,
       'updatedAt': FieldValue.serverTimestamp(),
     });
   }
@@ -234,12 +357,16 @@ class AdminService {
       case 'comments':
         return 'comments';
 
-      case 'user':
-      case 'users':
-        return 'users';
-
       default:
         return null;
+    }
+  }
+
+  static Future<void> _requireAdminOrModerator() async {
+    final allowed = await hasAdminAccess();
+
+    if (!allowed) {
+      throw Exception('Bạn không có quyền xử lý report');
     }
   }
 }

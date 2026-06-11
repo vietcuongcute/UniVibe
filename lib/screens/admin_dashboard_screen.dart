@@ -56,6 +56,497 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     _adminAccessFuture = AdminService.hasAdminAccess();
   }
 
+  String? _collectionFromTargetType(String targetType) {
+    switch (targetType) {
+      case 'marketPost':
+      case 'marketPosts':
+        return 'marketPosts';
+
+      case 'confession':
+      case 'confessions':
+        return 'confessions';
+
+      case 'moment':
+      case 'moments':
+        return 'moments';
+
+      case 'user':
+      case 'users':
+        return 'users';
+
+      default:
+        return null;
+    }
+  }
+
+  String _labelFromTargetType(String targetType) {
+    switch (targetType) {
+      case 'marketPost':
+      case 'marketPosts':
+        return 'Bài Market';
+
+      case 'confession':
+      case 'confessions':
+        return 'Confession';
+
+      case 'moment':
+      case 'moments':
+        return 'UniMoment';
+
+      case 'user':
+      case 'users':
+        return 'Người dùng';
+
+      default:
+        return 'Nội dung';
+    }
+  }
+
+  String _safeText(dynamic value, {String fallback = ''}) {
+    final text = value?.toString().trim() ?? '';
+    return text.isEmpty ? fallback : text;
+  }
+
+  String _extractTargetTitle({
+    required String targetType,
+    required Map<String, dynamic> reportData,
+    Map<String, dynamic>? targetData,
+  }) {
+    final fromReport = _safeText(reportData['targetTitle']);
+    if (fromReport.isNotEmpty) {
+      return fromReport;
+    }
+
+    if (targetData == null) {
+      return _labelFromTargetType(targetType);
+    }
+
+    if (targetType == 'marketPost' || targetType == 'marketPosts') {
+      return _safeText(
+        targetData['title'],
+        fallback: 'Bài Market không có tiêu đề',
+      );
+    }
+
+    if (targetType == 'confession' || targetType == 'confessions') {
+      return _safeText(
+        targetData['content'],
+        fallback: 'Confession không có nội dung',
+      );
+    }
+
+    if (targetType == 'moment' || targetType == 'moments') {
+      return _safeText(
+        targetData['text'],
+        fallback: 'UniMoment không có nội dung',
+      );
+    }
+
+    if (targetType == 'user' || targetType == 'users') {
+      return _safeText(
+        targetData['nickname'],
+        fallback: _safeText(targetData['email'], fallback: 'Người dùng'),
+      );
+    }
+
+    return _labelFromTargetType(targetType);
+  }
+
+  String _extractTargetPreview({
+    required String targetType,
+    required Map<String, dynamic> reportData,
+    Map<String, dynamic>? targetData,
+  }) {
+    final fromReport = _safeText(reportData['targetPreview']);
+    if (fromReport.isNotEmpty) {
+      return fromReport;
+    }
+
+    final detail = _safeText(reportData['detail']);
+    if (detail.isNotEmpty) {
+      return detail;
+    }
+
+    if (targetData == null) {
+      return 'Chưa tải được nội dung gốc.';
+    }
+
+    if (targetType == 'marketPost' || targetType == 'marketPosts') {
+      final description = _safeText(targetData['description']);
+      final price = _safeText(targetData['price']);
+      final category = _safeText(targetData['category']);
+
+      final parts = <String>[
+        if (description.isNotEmpty) description,
+        if (price.isNotEmpty) 'Giá: $price',
+        if (category.isNotEmpty) 'Danh mục: $category',
+      ];
+
+      return parts.isEmpty ? 'Bài Market chưa có mô tả.' : parts.join('\n');
+    }
+
+    if (targetType == 'confession' || targetType == 'confessions') {
+      return _safeText(
+        targetData['content'],
+        fallback: 'Confession chưa có nội dung.',
+      );
+    }
+
+    if (targetType == 'moment' || targetType == 'moments') {
+      return _safeText(
+        targetData['text'],
+        fallback: 'Moment chưa có nội dung.',
+      );
+    }
+
+    if (targetType == 'user' || targetType == 'users') {
+      final bio = _safeText(targetData['bio']);
+      final major = _safeText(targetData['major']);
+      final university = _safeText(targetData['university']);
+
+      final parts = <String>[
+        if (bio.isNotEmpty) bio,
+        if (major.isNotEmpty) 'Ngành: $major',
+        if (university.isNotEmpty) 'Trường: $university',
+      ];
+
+      return parts.isEmpty ? 'User chưa có thông tin hồ sơ.' : parts.join('\n');
+    }
+
+    return 'Không có nội dung xem trước.';
+  }
+
+  Future<Map<String, dynamic>?> _loadTargetDataFromReport(
+    Map<String, dynamic> reportData,
+  ) async {
+    final targetType = _safeText(reportData['targetType']);
+    final targetId = _safeText(reportData['targetId']);
+
+    if (targetType.isEmpty || targetId.isEmpty) {
+      return null;
+    }
+
+    final collectionName = _collectionFromTargetType(targetType);
+
+    if (collectionName == null) {
+      return null;
+    }
+
+    final doc = await FirebaseFirestore.instance
+        .collection(collectionName)
+        .doc(targetId)
+        .get();
+
+    return doc.data();
+  }
+
+  String _contentLabel(String collectionName) {
+    switch (collectionName) {
+      case 'marketPosts':
+        return 'Bài Market';
+      case 'moments':
+        return 'UniMoment';
+      case 'confessions':
+      default:
+        return 'Confession';
+    }
+  }
+
+  String _contentTitleFromData({
+    required String collectionName,
+    required Map<String, dynamic> data,
+  }) {
+    if (collectionName == 'marketPosts') {
+      return _safeText(data['title'], fallback: 'Bài Market không có tiêu đề');
+    }
+
+    if (collectionName == 'moments') {
+      return _safeText(data['text'], fallback: 'UniMoment không có nội dung');
+    }
+
+    return _safeText(data['content'], fallback: 'Confession không có nội dung');
+  }
+
+  String _contentPreviewFromData({
+    required String collectionName,
+    required Map<String, dynamic> data,
+  }) {
+    if (collectionName == 'marketPosts') {
+      final description = _safeText(data['description']);
+      final category = _safeText(data['category']);
+      final price = _safeText(data['price']);
+
+      final parts = <String>[
+        if (description.isNotEmpty) description,
+        if (category.isNotEmpty) 'Danh mục: $category',
+        if (price.isNotEmpty) 'Giá: $price đ',
+      ];
+
+      return parts.isEmpty ? 'Bài Market chưa có mô tả.' : parts.join('\n');
+    }
+
+    if (collectionName == 'moments') {
+      return _safeText(data['text'], fallback: 'Moment chưa có nội dung.');
+    }
+
+    return _safeText(data['content'], fallback: 'Confession chưa có nội dung.');
+  }
+
+  String _authorIdFromContent(Map<String, dynamic> data) {
+    return _safeText(
+      data['authorId'],
+      fallback: _safeText(
+        data['sellerId'],
+        fallback: _safeText(data['userId']),
+      ),
+    );
+  }
+
+  Future<String> _loadUserDisplayName(String userId) async {
+    if (userId.trim().isEmpty) {
+      return 'Không rõ';
+    }
+
+    final doc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(userId.trim())
+        .get();
+
+    final data = doc.data();
+
+    if (data == null) {
+      return 'Không rõ';
+    }
+
+    return _safeText(
+      data['nickname'],
+      fallback: _safeText(data['email'], fallback: 'Không rõ'),
+    );
+  }
+
+  Widget _buildReportedContentBox(Map<String, dynamic> reportData) {
+    final targetType = _safeText(reportData['targetType']);
+    final targetId = _safeText(reportData['targetId']);
+    final reporterName = _safeText(
+      reportData['reporterName'],
+      fallback: _safeText(reportData['reporterId'], fallback: 'Không rõ'),
+    );
+
+    return FutureBuilder<Map<String, dynamic>?>(
+      future: _loadTargetDataFromReport(reportData),
+      builder: (context, snapshot) {
+        final targetData = snapshot.data;
+
+        final title = _extractTargetTitle(
+          targetType: targetType,
+          reportData: reportData,
+          targetData: targetData,
+        );
+
+        final preview = _extractTargetPreview(
+          targetType: targetType,
+          reportData: reportData,
+          targetData: targetData,
+        );
+
+        final targetLabel = _labelFromTargetType(targetType);
+
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(15),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF9F7FF),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: _primary.withOpacity(0.08)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildMiniInfoRow(
+                icon: Icons.person_rounded,
+                label: 'Người report',
+                value: reporterName,
+              ),
+              const SizedBox(height: 9),
+              _buildMiniInfoRow(
+                icon: Icons.category_rounded,
+                label: 'Loại nội dung',
+                value: targetLabel,
+              ),
+              const SizedBox(height: 14),
+              const Text(
+                'Nội dung bị report',
+                style: TextStyle(
+                  color: _darkText,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 7),
+              Text(
+                title,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: _darkText,
+                  fontSize: 17,
+                  fontWeight: FontWeight.w900,
+                  height: 1.28,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                preview,
+                maxLines: 5,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.black54,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  height: 1.38,
+                ),
+              ),
+              if (targetId.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Text(
+                  'Mã nội dung: $targetId',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.black26,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildMiniInfoRow({
+    required IconData icon,
+    required String label,
+    required String value,
+  }) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, color: _primary, size: 17),
+        const SizedBox(width: 7),
+        SizedBox(
+          width: 112,
+          child: Text(
+            label,
+            style: const TextStyle(
+              color: Colors.black45,
+              fontSize: 12.5,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Colors.black87,
+              fontSize: 12.5,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildContentPreviewBox({
+    required QueryDocumentSnapshot<Map<String, dynamic>> doc,
+    required String title,
+    required String preview,
+    required String authorId,
+  }) {
+    return FutureBuilder<String>(
+      future: _loadUserDisplayName(authorId),
+      builder: (context, snapshot) {
+        final authorName = snapshot.data ?? 'Đang tải...';
+
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(15),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF9F7FF),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: _primary.withOpacity(0.08)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildMiniInfoRow(
+                icon: Icons.account_circle_rounded,
+                label: 'Người đăng',
+                value: authorName,
+              ),
+              const SizedBox(height: 9),
+              _buildMiniInfoRow(
+                icon: _contentIcon(_contentType),
+                label: 'Loại bài',
+                value: _contentLabel(_contentType),
+              ),
+              const SizedBox(height: 14),
+              const Text(
+                'Bài đăng',
+                style: TextStyle(
+                  color: _darkText,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 7),
+              Text(
+                title,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: _darkText,
+                  fontSize: 17,
+                  fontWeight: FontWeight.w900,
+                  height: 1.28,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                preview,
+                maxLines: 5,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.black54,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  height: 1.38,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'Mã bài: ${doc.id}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.black26,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   void _showSnack(String message) {
     if (!mounted) return;
 
@@ -886,7 +1377,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     final targetId = data['targetId']?.toString() ?? '';
     final reason = data['reason']?.toString() ?? 'Không có lý do';
     final detail = data['detail']?.toString() ?? '';
-    final reporterId = data['reporterId']?.toString() ?? '';
     final createdAt = _formatTimestamp(data['createdAt']);
 
     final canHide = targetType.isNotEmpty && targetId.isNotEmpty;
@@ -923,22 +1413,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             ),
           ],
           const SizedBox(height: 14),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: const Color(0xFFF9F7FF),
-              borderRadius: BorderRadius.circular(18),
-            ),
-            child: Column(
-              children: [
-                _buildMiniInfo(
-                  'Reporter',
-                  reporterId.isEmpty ? 'Không rõ' : reporterId,
-                ),
-                _buildMiniInfo('Target', '$targetType / $targetId'),
-              ],
-            ),
-          ),
+          _buildReportedContentBox(data),
           const SizedBox(height: 14),
           Wrap(
             spacing: 8,
@@ -1317,25 +1792,21 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   Widget _buildContentCard(QueryDocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data();
 
-    final title = data['title']?.toString().trim().isNotEmpty == true
-        ? data['title'].toString()
-        : data['content']?.toString().trim().isNotEmpty == true
-        ? data['content'].toString()
-        : data['description']?.toString().trim().isNotEmpty == true
-        ? data['description'].toString()
-        : 'Nội dung không có tiêu đề';
+    final title = _contentTitleFromData(
+      collectionName: _contentType,
+      data: data,
+    );
 
-    final status = data['status']?.toString() ?? 'active';
+    final preview = _contentPreviewFromData(
+      collectionName: _contentType,
+      data: data,
+    );
 
-    final authorId =
-        data['authorId']?.toString() ??
-        data['sellerId']?.toString() ??
-        data['userId']?.toString() ??
-        '';
-
+    final status = _safeText(data['status'], fallback: 'active');
+    final authorId = _authorIdFromContent(data);
     final createdAt = _formatTimestamp(data['createdAt']);
     final price = data['price'];
-    final category = data['category']?.toString() ?? '';
+    final category = _safeText(data['category']);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
@@ -1352,16 +1823,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             ],
           ),
           const SizedBox(height: 14),
-          Text(
-            title,
-            maxLines: 4,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              color: _darkText,
-              fontSize: 17,
-              fontWeight: FontWeight.w900,
-              height: 1.35,
-            ),
+          _buildContentPreviewBox(
+            doc: doc,
+            title: title,
+            preview: preview,
+            authorId: authorId,
           ),
           if (price != null || category.isNotEmpty) ...[
             const SizedBox(height: 10),
@@ -1379,23 +1845,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               ],
             ),
           ],
-          const SizedBox(height: 13),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: const Color(0xFFF9F7FF),
-              borderRadius: BorderRadius.circular(18),
-            ),
-            child: Column(
-              children: [
-                _buildMiniInfo('ID', doc.id),
-                _buildMiniInfo(
-                  'Author',
-                  authorId.isEmpty ? 'Không rõ' : authorId,
-                ),
-              ],
-            ),
-          ),
           const SizedBox(height: 14),
           Row(
             children: [
@@ -1693,39 +2142,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           },
         );
       },
-    );
-  }
-
-  Widget _buildMiniInfo(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 5),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 76,
-            child: Text(
-              label,
-              style: const TextStyle(
-                color: Colors.black45,
-                fontSize: 12.5,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ),
-          Expanded(
-            child: Text(
-              value,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: Colors.black87,
-                fontSize: 12.5,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-        ],
-      ),
     );
   }
 
