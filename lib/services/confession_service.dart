@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+import 'report_service.dart';
+
 class FirestoreConfession {
   final String id;
   final String authorId;
@@ -9,6 +11,7 @@ class FirestoreConfession {
   final String category;
   final bool isAnonymous;
   final bool isHidden;
+  final String status;
   final List<String> likeUserIds;
   final int commentCount;
   final int reportCount;
@@ -23,6 +26,7 @@ class FirestoreConfession {
     required this.category,
     required this.isAnonymous,
     required this.isHidden,
+    required this.status,
     required this.likeUserIds,
     required this.commentCount,
     required this.reportCount,
@@ -43,6 +47,7 @@ class FirestoreConfession {
       category: data['category']?.toString() ?? 'confession',
       isAnonymous: data['isAnonymous'] == true,
       isHidden: data['isHidden'] == true,
+      status: data['status']?.toString() ?? 'active',
       likeUserIds: (data['likeUserIds'] as List? ?? [])
           .map((item) => item.toString())
           .toList(),
@@ -75,6 +80,10 @@ class FirestoreConfession {
   bool likedBy(String uid) {
     return likeUserIds.contains(uid);
   }
+
+  bool get visibleToUser {
+    return !isHidden && status != 'hidden' && status != 'deleted';
+  }
 }
 
 class FirestoreConfessionComment {
@@ -84,6 +93,7 @@ class FirestoreConfessionComment {
   final String authorNickname;
   final String text;
   final bool isHidden;
+  final String status;
   final DateTime createdAt;
 
   const FirestoreConfessionComment({
@@ -93,6 +103,7 @@ class FirestoreConfessionComment {
     required this.authorNickname,
     required this.text,
     required this.isHidden,
+    required this.status,
     required this.createdAt,
   });
 
@@ -108,6 +119,7 @@ class FirestoreConfessionComment {
       authorNickname: data['authorNickname']?.toString() ?? 'Sinh viên UniVibe',
       text: data['text']?.toString() ?? '',
       isHidden: data['isHidden'] == true,
+      status: data['status']?.toString() ?? 'active',
       createdAt: _parseDate(data['createdAt']),
     );
   }
@@ -117,6 +129,10 @@ class FirestoreConfessionComment {
     if (value is DateTime) return value;
     if (value is String) return DateTime.tryParse(value) ?? DateTime.now();
     return DateTime.now();
+  }
+
+  bool get visibleToUser {
+    return !isHidden && status != 'hidden' && status != 'deleted';
   }
 }
 
@@ -128,10 +144,6 @@ class ConfessionService {
     return _db.collection('confessions');
   }
 
-  static CollectionReference<Map<String, dynamic>> get _reportsRef {
-    return _db.collection('reports');
-  }
-
   static String get currentUserId {
     return _auth.currentUser?.uid ?? '';
   }
@@ -141,12 +153,10 @@ class ConfessionService {
         .orderBy('createdAt', descending: true)
         .snapshots()
         .map((snapshot) {
-          final items = snapshot.docs
+          return snapshot.docs
               .map(FirestoreConfession.fromDoc)
-              .where((item) => !item.isHidden)
+              .where((item) => item.visibleToUser)
               .toList();
-
-          return items;
         });
   }
 
@@ -161,7 +171,7 @@ class ConfessionService {
         .map((snapshot) {
           return snapshot.docs
               .map(FirestoreConfessionComment.fromDoc)
-              .where((item) => !item.isHidden)
+              .where((item) => item.visibleToUser)
               .toList();
         });
   }
@@ -195,7 +205,8 @@ class ConfessionService {
         'category': category,
         'isAnonymous': isAnonymous,
         'isHidden': false,
-        'likeUserIds': <String>[],
+        'status': 'active',
+        'likeUserIds': [],
         'commentCount': 0,
         'reportCount': 0,
         'createdAt': now,
@@ -284,7 +295,9 @@ class ConfessionService {
         'authorNickname': authorNickname,
         'text': trimmedText,
         'isHidden': false,
+        'status': 'active',
         'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
       });
 
       batch.update(confessionRef, {
@@ -317,29 +330,26 @@ class ConfessionService {
     }
 
     try {
-      final reportRef = _reportsRef.doc();
+      final confessionDoc = await _confessionsRef.doc(confessionId).get();
+      final confessionData = confessionDoc.data() ?? {};
+      final authorId = confessionData['authorId']?.toString() ?? '';
 
-      final batch = _db.batch();
+      final message = await ReportService.createReport(
+        targetType: 'confession',
+        targetId: confessionId,
+        targetOwnerId: authorId,
+        reason: reason,
+        detail: detail,
+      );
 
-      batch.set(reportRef, {
-        'id': reportRef.id,
-        'type': 'confession',
-        'contentId': confessionId,
-        'reporterId': user.uid,
-        'reason': reason,
-        'detail': detail.trim(),
-        'status': 'pending',
-        'createdAt': FieldValue.serverTimestamp(),
-      });
+      if (message.startsWith('Đã gửi report')) {
+        await _confessionsRef.doc(confessionId).update({
+          'reportCount': FieldValue.increment(1),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      }
 
-      batch.update(_confessionsRef.doc(confessionId), {
-        'reportCount': FieldValue.increment(1),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-
-      await batch.commit();
-
-      return 'Đã gửi report. Admin/moderator sẽ kiểm tra sau.';
+      return message;
     } on FirebaseException catch (e) {
       if (e.code == 'permission-denied') {
         return 'Không có quyền report. Kiểm tra Firestore Rules.';

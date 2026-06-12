@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 
 import '../models/market_post.dart';
 import '../models/user_profile.dart';
+import 'report_service.dart';
 
 class MarketService {
   MarketService._();
@@ -22,12 +23,36 @@ class MarketService {
     return _db.collection('chatRooms');
   }
 
-  static Stream<List<MarketPost>> marketPostsStream() {
+  static Stream<List<MarketPost>> marketPostsStream({
+    String category = 'Tất cả',
+    String keyword = '',
+    bool includeSold = true,
+  }) {
     return _marketPostsRef
         .orderBy('createdAt', descending: true)
         .snapshots()
         .map((snapshot) {
-          return snapshot.docs.map((doc) => MarketPost.fromDoc(doc)).toList();
+          final lowerKeyword = keyword.trim().toLowerCase();
+
+          return snapshot.docs
+              .map((doc) => MarketPost.fromDoc(doc))
+              .where((post) => post.status != 'hidden')
+              .where((post) => post.status != 'deleted')
+              .where((post) => includeSold || post.status != 'sold')
+              .where((post) {
+                if (category == 'Tất cả' || category.trim().isEmpty) {
+                  return true;
+                }
+                return post.category == category;
+              })
+              .where((post) {
+                if (lowerKeyword.isEmpty) return true;
+
+                return post.title.toLowerCase().contains(lowerKeyword) ||
+                    post.description.toLowerCase().contains(lowerKeyword) ||
+                    post.category.toLowerCase().contains(lowerKeyword);
+              })
+              .toList();
         });
   }
 
@@ -66,8 +91,10 @@ class MarketService {
       'description': trimmedDescription,
       'price': price,
       'category': category,
-      'imageUrls': <String>[],
+      'imageUrls': [],
       'status': 'active',
+      'isHidden': false,
+      'reportCount': 0,
       'createdAt': now,
       'updatedAt': now,
     });
@@ -103,7 +130,14 @@ class MarketService {
   static Stream<MarketPost?> marketPostStream(String postId) {
     return _marketPostsRef.doc(postId).snapshots().map((doc) {
       if (!doc.exists) return null;
-      return MarketPost.fromDoc(doc);
+
+      final post = MarketPost.fromDoc(doc);
+
+      if (post.status == 'hidden' || post.status == 'deleted') {
+        return null;
+      }
+
+      return post;
     });
   }
 
@@ -179,7 +213,10 @@ class MarketService {
       throw Exception('Bạn chỉ có thể xoá bài của chính mình.');
     }
 
-    await postRef.delete();
+    await postRef.update({
+      'status': 'deleted',
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
   }
 
   static Future<String> startChatWithSeller(MarketPost post) async {
@@ -225,7 +262,7 @@ class MarketService {
       'type': 'market',
       'marketPostId': post.id,
       'status': 'active',
-      'deletedFor': <String>[],
+      'deletedFor': [],
       'createdAt': now,
       'updatedAt': now,
       'lastMessage': 'Bắt đầu chat từ Market: ${post.title}',
@@ -249,41 +286,28 @@ class MarketService {
     return chatRoomId;
   }
 
-  static Future<void> reportMarketPost({
+  static Future<String> reportMarketPost({
     required String postId,
     required String sellerId,
     required String reason,
     required String description,
   }) async {
-    final user = _auth.currentUser;
+    final message = await ReportService.createReport(
+      targetType: 'marketPost',
+      targetId: postId,
+      targetOwnerId: sellerId,
+      reason: reason,
+      detail: description,
+    );
 
-    if (user == null) {
-      throw Exception('Bạn chưa đăng nhập.');
+    if (message.startsWith('Đã gửi report')) {
+      await _marketPostsRef.doc(postId).update({
+        'reportCount': FieldValue.increment(1),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
     }
 
-    if (postId.trim().isEmpty) {
-      throw Exception('Không tìm thấy bài đăng.');
-    }
-
-    if (sellerId == user.uid) {
-      throw Exception('Bạn không thể báo cáo bài của chính mình.');
-    }
-
-    if (reason.trim().isEmpty) {
-      throw Exception('Vui lòng chọn lý do báo cáo.');
-    }
-
-    await _db.collection('reports').add({
-      'reporterId': user.uid,
-      'targetType': 'marketPost',
-      'targetId': postId,
-      'targetOwnerId': sellerId,
-      'reason': reason.trim(),
-      'description': description.trim(),
-      'status': 'pending',
-      'createdAt': FieldValue.serverTimestamp(),
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
+    return message;
   }
 
   static Future<String?> _findExistingDirectRoom({
@@ -296,6 +320,7 @@ class MarketService {
 
     for (final doc in snapshot.docs) {
       final data = doc.data();
+
       final userIds = (data['userIds'] as List? ?? [])
           .map((item) => item.toString())
           .toList();
@@ -328,6 +353,7 @@ class MarketService {
         id: uid,
         nickname: 'Người dùng UniVibe',
         avatarUrl: '',
+        coverUrl: '',
         university: '',
         major: '',
         year: 1,
@@ -335,6 +361,7 @@ class MarketService {
         interests: const [],
         goals: const [],
         vibeTags: const [],
+        featuredImageUrls: const [],
         bio: '',
       );
     }

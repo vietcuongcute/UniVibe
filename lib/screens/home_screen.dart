@@ -48,23 +48,21 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  List<Widget> _buildTabs() {
-    return [
-      const VibeTab(),
-      const ConfessionTab(),
-      const UniMomentTab(),
-      const MarketTab(),
-      const ChatTab(),
-      AccountTab(onNavigate: _goToTab),
-    ];
-  }
+  late final List<Widget> _tabs = [
+    const VibeTab(),
+    const ConfessionTab(),
+    const UniMomentTab(),
+    const MarketTab(),
+    const ChatTab(),
+    AccountTab(onNavigate: _goToTab),
+  ];
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _bg,
       appBar: _buildAppBar(),
-      body: IndexedStack(index: _currentIndex, children: _buildTabs()),
+      body: IndexedStack(index: _currentIndex, children: _tabs),
       bottomNavigationBar: _buildBottomNavigation(),
     );
   }

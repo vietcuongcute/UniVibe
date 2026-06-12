@@ -47,8 +47,9 @@ class UserProfileService {
       'interests': interests,
       'goals': goals,
       'vibeTags': vibeTags,
-      'featuredImageUrls': <String>[],
+      'featuredImageUrls': [],
       'role': 'student',
+      'status': 'active',
       'createdAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
     });

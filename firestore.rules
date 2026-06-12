@@ -1,0 +1,135 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userPath() {
+      return /databases/$(database)/documents/users/$(request.auth.uid);
+    }
+
+    function hasUserDoc() {
+      return signedIn() && exists(userPath());
+    }
+
+    function myStatus() {
+      return hasUserDoc() && get(userPath()).data.status != null
+        ? get(userPath()).data.status
+        : "active";
+    }
+
+    function myRole() {
+      return hasUserDoc() && get(userPath()).data.role != null
+        ? get(userPath()).data.role
+        : "student";
+    }
+
+    function notBlocked() {
+      return signedIn() && myStatus() != "blocked";
+    }
+
+    function isAdmin() {
+      return notBlocked() && myRole() == "admin";
+    }
+
+    function isModeratorOrAdmin() {
+      return notBlocked()
+        && (
+          myRole() == "admin"
+          || myRole() == "moderator"
+        );
+    }
+
+    // USER PROFILE
+    match /users/{userId} {
+      allow read: if signedIn();
+
+      allow create: if signedIn()
+        && request.auth.uid == userId;
+
+      allow update: if signedIn()
+        && (
+          request.auth.uid == userId
+          || isAdmin()
+        );
+
+      allow delete: if isAdmin();
+    }
+
+    // APP DEV RULES - cho chạy trước
+    match /signals/{docId} {
+      allow read, create, update, delete: if notBlocked();
+    }
+
+    match /matches/{docId} {
+      allow read, create, update, delete: if notBlocked();
+    }
+
+    match /blindQueue/{docId} {
+      allow read, create, update, delete: if notBlocked();
+    }
+
+    match /chatRooms/{chatRoomId} {
+      allow read, create, update, delete: if notBlocked();
+
+      match /messages/{messageId} {
+        allow read, create, update, delete: if notBlocked();
+      }
+    }
+
+    match /confessions/{confessionId} {
+      allow read, create, update, delete: if notBlocked();
+
+      match /comments/{commentId} {
+        allow read, create, update, delete: if notBlocked();
+      }
+
+      match /likes/{likeId} {
+        allow read, create, update, delete: if notBlocked();
+      }
+    }
+
+    match /moments/{momentId} {
+      allow read, create, update, delete: if notBlocked();
+    }
+
+    match /marketPosts/{postId} {
+      allow read, create, update, delete: if notBlocked();
+    }
+
+    match /reports/{reportId} {
+      allow read, create, update, delete: if notBlocked();
+    }
+
+    match /clubs/{clubId} {
+      allow read, create, update, delete: if notBlocked();
+    }
+
+    match /clubPosts/{postId} {
+      allow read, create, update, delete: if notBlocked();
+    }
+
+    match /events/{eventId} {
+      allow read, create, update, delete: if notBlocked();
+    }
+
+    match /notifications/{notificationId} {
+      allow read, create, update, delete: if notBlocked();
+    }
+
+    match /badges/{badgeId} {
+      allow read, create, update, delete: if notBlocked();
+    }
+
+    match /dailyQuestions/{questionId} {
+      allow read, create, update, delete: if notBlocked();
+    }
+
+    // Bắt hết collection nào còn sót trong lúc dev
+    match /{document=**} {
+      allow read, create, update, delete: if notBlocked();
+    }
+  }
+}

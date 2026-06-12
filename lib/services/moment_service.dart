@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
+import 'report_service.dart';
 
 class FirestoreMoment {
   final String id;
@@ -17,6 +18,7 @@ class FirestoreMoment {
   final int reportCount;
   final DateTime createdAt;
   final DateTime expiresAt;
+  final String status;
 
   const FirestoreMoment({
     required this.id,
@@ -30,6 +32,7 @@ class FirestoreMoment {
     required this.reportCount,
     required this.createdAt,
     required this.expiresAt,
+    required this.status,
   });
 
   factory FirestoreMoment.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
@@ -54,6 +57,7 @@ class FirestoreMoment {
       caption: data['caption']?.toString() ?? '',
       audience: data['audience']?.toString() ?? 'campus',
       isHidden: data['isHidden'] == true,
+      status: data['status']?.toString() ?? 'active',
       reactions: parsedReactions,
       reportCount: _parseInt(data['reportCount']),
       createdAt: _parseDate(data['createdAt']),
@@ -77,6 +81,13 @@ class FirestoreMoment {
 
   bool get isExpired {
     return DateTime.now().isAfter(expiresAt);
+  }
+
+  bool get visibleToUser {
+    return !isHidden &&
+        status != 'hidden' &&
+        status != 'deleted' &&
+        expiresAt.isAfter(DateTime.now());
   }
 
   int get reactionCount {
@@ -132,12 +143,9 @@ class MomentService {
     return _momentsRef.orderBy('createdAt', descending: true).snapshots().map((
       snapshot,
     ) {
-      final now = DateTime.now();
-
       return snapshot.docs
           .map(FirestoreMoment.fromDoc)
-          .where((moment) => !moment.isHidden)
-          .where((moment) => moment.expiresAt.isAfter(now))
+          .where((moment) => moment.visibleToUser)
           .toList();
     });
   }
@@ -195,6 +203,8 @@ class MomentService {
           '😮': <String>[],
           '👏': <String>[],
         },
+        'status': 'active',
+        'isHidden': false,
         'reportCount': 0,
         'createdAt': FieldValue.serverTimestamp(),
         'expiresAt': Timestamp.fromDate(expiresAt),
@@ -291,29 +301,26 @@ class MomentService {
     }
 
     try {
-      final reportRef = _reportsRef.doc();
+      final momentDoc = await _momentsRef.doc(momentId).get();
+      final momentData = momentDoc.data() ?? {};
+      final authorId = momentData['authorId']?.toString() ?? '';
 
-      final batch = _db.batch();
+      final message = await ReportService.createReport(
+        targetType: 'moment',
+        targetId: momentId,
+        targetOwnerId: authorId,
+        reason: reason,
+        detail: detail,
+      );
 
-      batch.set(reportRef, {
-        'id': reportRef.id,
-        'type': 'moment',
-        'contentId': momentId,
-        'reporterId': user.uid,
-        'reason': reason,
-        'detail': detail.trim(),
-        'status': 'pending',
-        'createdAt': FieldValue.serverTimestamp(),
-      });
+      if (message.startsWith('Đã gửi report')) {
+        await _momentsRef.doc(momentId).update({
+          'reportCount': FieldValue.increment(1),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      }
 
-      batch.update(_momentsRef.doc(momentId), {
-        'reportCount': FieldValue.increment(1),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-
-      await batch.commit();
-
-      return 'Đã gửi report. Admin/moderator sẽ kiểm tra sau.';
+      return message;
     } on FirebaseException catch (e) {
       if (e.code == 'permission-denied') {
         return 'Không có quyền report. Kiểm tra Firebase Rules.';

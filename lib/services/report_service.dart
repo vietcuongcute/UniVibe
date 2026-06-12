@@ -1,7 +1,80 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
-import '../models/user_profile.dart';
+class UniReport {
+  final String id;
+  final String reporterId;
+  final String targetType;
+  final String targetId;
+  final String targetOwnerId;
+  final String reason;
+  final String detail;
+  final String status;
+  final String action;
+  final String adminNote;
+  final String handledBy;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+  final DateTime? handledAt;
+
+  const UniReport({
+    required this.id,
+    required this.reporterId,
+    required this.targetType,
+    required this.targetId,
+    required this.targetOwnerId,
+    required this.reason,
+    required this.detail,
+    required this.status,
+    required this.action,
+    required this.adminNote,
+    required this.handledBy,
+    required this.createdAt,
+    required this.updatedAt,
+    this.handledAt,
+  });
+
+  factory UniReport.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
+    final data = doc.data() ?? {};
+
+    return UniReport(
+      id: doc.id,
+      reporterId: data['reporterId']?.toString() ?? '',
+      targetType:
+          data['targetType']?.toString() ??
+          data['type']?.toString() ??
+          'unknown',
+      targetId:
+          data['targetId']?.toString() ?? data['contentId']?.toString() ?? '',
+      targetOwnerId: data['targetOwnerId']?.toString() ?? '',
+      reason: data['reason']?.toString() ?? '',
+      detail:
+          data['detail']?.toString() ?? data['description']?.toString() ?? '',
+      status: data['status']?.toString() ?? 'pending',
+      action: data['action']?.toString() ?? 'none',
+      adminNote: data['adminNote']?.toString() ?? '',
+      handledBy: data['handledBy']?.toString() ?? '',
+      createdAt: _parseDate(data['createdAt']),
+      updatedAt: _parseDate(data['updatedAt']),
+      handledAt: _parseNullableDate(data['handledAt']),
+    );
+  }
+
+  static DateTime _parseDate(dynamic value) {
+    if (value is Timestamp) return value.toDate();
+    if (value is DateTime) return value;
+    if (value is String) return DateTime.tryParse(value) ?? DateTime.now();
+    return DateTime.now();
+  }
+
+  static DateTime? _parseNullableDate(dynamic value) {
+    if (value == null) return null;
+    if (value is Timestamp) return value.toDate();
+    if (value is DateTime) return value;
+    if (value is String) return DateTime.tryParse(value);
+    return null;
+  }
+}
 
 class ReportService {
   ReportService._();
@@ -9,52 +82,8 @@ class ReportService {
   static final FirebaseFirestore _db = FirebaseFirestore.instance;
   static final FirebaseAuth _auth = FirebaseAuth.instance;
 
-  static CollectionReference<Map<String, dynamic>> get reportsRef {
+  static CollectionReference<Map<String, dynamic>> get _reportsRef {
     return _db.collection('reports');
-  }
-
-  static String? get currentUid => _auth.currentUser?.uid;
-
-  static String get _currentUserName {
-    final user = _auth.currentUser;
-    final displayName = user?.displayName?.trim();
-
-    if (displayName != null && displayName.isNotEmpty) {
-      return displayName;
-    }
-
-    final email = user?.email?.trim();
-
-    if (email != null && email.isNotEmpty) {
-      return email;
-    }
-
-    return 'Ẩn danh';
-  }
-
-  static Stream<QuerySnapshot<Map<String, dynamic>>> reportsStream({
-    String status = 'all',
-  }) {
-    Query<Map<String, dynamic>> query = reportsRef;
-
-    if (status != 'all') {
-      query = query.where('status', isEqualTo: status);
-    }
-
-    return query.orderBy('createdAt', descending: true).snapshots();
-  }
-
-  static Stream<QuerySnapshot<Map<String, dynamic>>> myReportsStream() {
-    final uid = currentUid;
-
-    if (uid == null) {
-      throw Exception('User chưa đăng nhập');
-    }
-
-    return reportsRef
-        .where('reporterId', isEqualTo: uid)
-        .orderBy('createdAt', descending: true)
-        .snapshots();
   }
 
   static Future<String> createReport({
@@ -62,175 +91,101 @@ class ReportService {
     required String targetId,
     required String reason,
     String targetOwnerId = '',
-    String targetTitle = '',
-    String targetPreview = '',
     String detail = '',
   }) async {
-    final uid = currentUid;
+    final user = _auth.currentUser;
 
-    if (uid == null) {
-      throw Exception('Bạn cần đăng nhập để gửi report.');
+    if (user == null) {
+      return 'Bạn chưa đăng nhập.';
     }
 
-    final cleanTargetType = targetType.trim();
-    final cleanTargetId = targetId.trim();
-    final cleanReason = reason.trim();
-    final cleanDetail = detail.trim();
-
-    if (cleanTargetType.isEmpty) {
-      throw Exception('Thiếu loại nội dung cần report.');
+    if (targetType.trim().isEmpty || targetId.trim().isEmpty) {
+      return 'Thiếu thông tin nội dung cần report.';
     }
 
-    if (cleanTargetId.isEmpty) {
-      throw Exception('Thiếu ID nội dung cần report.');
+    if (reason.trim().isEmpty) {
+      return 'Vui lòng chọn lý do report.';
     }
 
-    if (cleanReason.isEmpty) {
-      throw Exception('Vui lòng chọn lý do report.');
+    if (targetOwnerId.trim().isNotEmpty && targetOwnerId == user.uid) {
+      return 'Bạn không thể report nội dung của chính mình.';
     }
 
-    final existed = await reportsRef
-        .where('reporterId', isEqualTo: uid)
-        .where('targetType', isEqualTo: cleanTargetType)
-        .where('targetId', isEqualTo: cleanTargetId)
-        .where('status', isEqualTo: 'pending')
-        .limit(1)
-        .get();
+    try {
+      final reportRef = _reportsRef.doc();
+      final now = FieldValue.serverTimestamp();
 
-    if (existed.docs.isNotEmpty) {
-      return 'Bạn đã report nội dung này rồi. Admin sẽ xem xét sớm.';
+      await reportRef.set({
+        'id': reportRef.id,
+        'reporterId': user.uid,
+        'targetType': targetType.trim(),
+        'targetId': targetId.trim(),
+        'targetOwnerId': targetOwnerId.trim(),
+        'reason': reason.trim(),
+        'detail': detail.trim(),
+        'status': 'pending',
+        'action': 'none',
+        'adminNote': '',
+        'handledBy': '',
+        'createdAt': now,
+        'updatedAt': now,
+        'handledAt': null,
+      });
+
+      return 'Đã gửi report. Admin/moderator sẽ kiểm tra sau.';
+    } on FirebaseException catch (e) {
+      if (e.code == 'permission-denied') {
+        return 'Không có quyền gửi report. Kiểm tra Firestore Rules.';
+      }
+      return 'Gửi report thất bại: ${e.message ?? e.code}';
+    } catch (e) {
+      return 'Gửi report thất bại: $e';
+    }
+  }
+
+  static Stream<List<UniReport>> reportsStream({
+    String status = 'all',
+    String targetType = 'all',
+  }) {
+    Query<Map<String, dynamic>> query = _reportsRef;
+
+    if (status != 'all') {
+      query = query.where('status', isEqualTo: status);
     }
 
-    final docRef = reportsRef.doc();
+    if (targetType != 'all') {
+      query = query.where('targetType', isEqualTo: targetType);
+    }
 
-    await docRef.set({
-      'id': docRef.id,
-      'reporterId': uid,
-      'reporterName': _currentUserName,
-      'targetType': cleanTargetType,
-      'targetId': cleanTargetId,
-      'targetOwnerId': targetOwnerId.trim(),
-      'targetTitle': targetTitle.trim(),
-      'targetPreview': targetPreview.trim(),
-      'reason': cleanReason,
-      'detail': cleanDetail,
-      'status': 'pending',
-      'action': 'none',
-      'adminNote': '',
-      'handledBy': '',
-      'handledAt': null,
-      'createdAt': FieldValue.serverTimestamp(),
+    return query
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map((snapshot) => snapshot.docs.map(UniReport.fromDoc).toList());
+  }
+
+  static Future<void> updateReportStatus({
+    required String reportId,
+    required String status,
+    String action = 'none',
+    String adminNote = '',
+  }) async {
+    final user = _auth.currentUser;
+
+    if (user == null) {
+      throw Exception('Bạn chưa đăng nhập.');
+    }
+
+    if (!['pending', 'reviewing', 'resolved', 'rejected'].contains(status)) {
+      throw Exception('Trạng thái report không hợp lệ.');
+    }
+
+    await _reportsRef.doc(reportId).update({
+      'status': status,
+      'action': action,
+      'adminNote': adminNote.trim(),
+      'handledBy': user.uid,
+      'handledAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
     });
-
-    return 'Đã gửi report. Admin sẽ xem xét nội dung này.';
-  }
-
-  static Future<String> reportUser({
-    required UserProfile currentUser,
-    required UserProfile targetUser,
-    required String reason,
-    String detail = '',
-  }) async {
-    return createReport(
-      targetType: 'user',
-      targetId: targetUser.id,
-      targetOwnerId: targetUser.id,
-      targetTitle: targetUser.nickname,
-      targetPreview: targetUser.bio,
-      reason: reason,
-      detail: detail,
-    );
-  }
-
-  static Future<String> reportConfession({
-    required String confessionId,
-    required String authorId,
-    required String content,
-    required String reason,
-    String detail = '',
-  }) async {
-    return createReport(
-      targetType: 'confession',
-      targetId: confessionId,
-      targetOwnerId: authorId,
-      targetTitle: 'Confession',
-      targetPreview: content,
-      reason: reason,
-      detail: detail,
-    );
-  }
-
-  static Future<String> reportMarketPost({
-    required String postId,
-    required String sellerId,
-    required String title,
-    required String description,
-    required String reason,
-    String detail = '',
-  }) async {
-    return createReport(
-      targetType: 'marketPost',
-      targetId: postId,
-      targetOwnerId: sellerId,
-      targetTitle: title,
-      targetPreview: description,
-      reason: reason,
-      detail: detail,
-    );
-  }
-
-  static Future<String> reportMoment({
-    required String momentId,
-    required String authorId,
-    required String text,
-    required String reason,
-    String detail = '',
-  }) async {
-    return createReport(
-      targetType: 'moment',
-      targetId: momentId,
-      targetOwnerId: authorId,
-      targetTitle: 'UniMoment',
-      targetPreview: text,
-      reason: reason,
-      detail: detail,
-    );
-  }
-
-  static Future<String> reportComment({
-    required String commentId,
-    required String authorId,
-    required String content,
-    required String reason,
-    String detail = '',
-  }) async {
-    return createReport(
-      targetType: 'comment',
-      targetId: commentId,
-      targetOwnerId: authorId,
-      targetTitle: 'Bình luận',
-      targetPreview: content,
-      reason: reason,
-      detail: detail,
-    );
-  }
-
-  static Future<String> reportChatMessage({
-    required String messageId,
-    required String senderId,
-    required String content,
-    required String reason,
-    String detail = '',
-  }) async {
-    return createReport(
-      targetType: 'chatMessage',
-      targetId: messageId,
-      targetOwnerId: senderId,
-      targetTitle: 'Tin nhắn chat',
-      targetPreview: content,
-      reason: reason,
-      detail: detail,
-    );
   }
 }

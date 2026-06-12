@@ -9,6 +9,8 @@ class MarketPost {
   final String category;
   final List<String> imageUrls;
   final String status;
+  final bool isHidden;
+  final int reportCount;
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -21,11 +23,17 @@ class MarketPost {
     required this.category,
     required this.imageUrls,
     required this.status,
+    required this.isHidden,
+    required this.reportCount,
     required this.createdAt,
     required this.updatedAt,
   });
 
   bool get isSold => status == 'sold';
+
+  bool get visibleToUser {
+    return !isHidden && status != 'hidden' && status != 'deleted';
+  }
 
   factory MarketPost.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data() ?? {};
@@ -39,6 +47,8 @@ class MarketPost {
       category: data['category']?.toString() ?? 'Khác',
       imageUrls: _parseStringList(data['imageUrls']),
       status: data['status']?.toString() ?? 'active',
+      isHidden: data['isHidden'] == true,
+      reportCount: _parseInt(data['reportCount']),
       createdAt: _parseDate(data['createdAt']),
       updatedAt: _parseDate(data['updatedAt']),
     );
@@ -47,6 +57,13 @@ class MarketPost {
   static num _parsePrice(dynamic value) {
     if (value is num) return value;
     if (value is String) return num.tryParse(value) ?? 0;
+    return 0;
+  }
+
+  static int _parseInt(dynamic value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    if (value is String) return int.tryParse(value) ?? 0;
     return 0;
   }
 
