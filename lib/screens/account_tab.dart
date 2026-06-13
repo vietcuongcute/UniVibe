@@ -21,6 +21,8 @@ class _AccountTabState extends State<AccountTab> {
   static const Color _pink = Color(0xFFEC5AA6);
   static const Color _darkText = Color(0xFF2D1B69);
   static const Color _bg = Color(0xFFF7F3FF);
+  static const Color _softPurple = Color(0xFFF1EAFF);
+  static const Color _border = Color(0xFFEDE7FF);
 
   late Future<UserProfile?> _profileFuture;
   late Future<_UserDashboardStats> _statsFuture;
@@ -48,9 +50,13 @@ class _AccountTabState extends State<AccountTab> {
     try {
       final userDoc = await db.collection('users').doc(uid).get();
       final role = userDoc.data()?['role']?.toString() ?? 'student';
+      final status = userDoc.data()?['status']?.toString() ?? 'active';
 
       final results = await Future.wait<int>([
         _safeCount(db.collection('signals').where('senderId', isEqualTo: uid)),
+        _safeCount(
+          db.collection('signals').where('receiverId', isEqualTo: uid),
+        ),
         _safeCount(
           db.collection('matches').where('userIds', arrayContains: uid),
         ),
@@ -60,7 +66,7 @@ class _AccountTabState extends State<AccountTab> {
         _safeCount(
           db.collection('confessions').where('authorId', isEqualTo: uid),
         ),
-        _safeCountMoment(uid),
+        _safeCount(db.collection('moments').where('authorId', isEqualTo: uid)),
         _safeCount(
           db.collection('marketPosts').where('sellerId', isEqualTo: uid),
         ),
@@ -68,12 +74,14 @@ class _AccountTabState extends State<AccountTab> {
 
       return _UserDashboardStats(
         sentSignals: results[0],
-        matches: results[1],
-        chatRooms: results[2],
-        confessions: results[3],
-        moments: results[4],
-        marketPosts: results[5],
+        receivedSignals: results[1],
+        matches: results[2],
+        chatRooms: results[3],
+        confessions: results[4],
+        moments: results[5],
+        marketPosts: results[6],
         role: role,
+        status: status,
       );
     } catch (_) {
       return _UserDashboardStats.empty();
@@ -89,16 +97,22 @@ class _AccountTabState extends State<AccountTab> {
     }
   }
 
-  Future<int> _safeCountMoment(String uid) async {
-    final db = FirebaseFirestore.instance;
+  void _goTo(int index) {
+    widget.onNavigate?.call(index);
+  }
 
-    final byAuthorId = await _safeCount(
-      db.collection('moments').where('authorId', isEqualTo: uid),
+  void _showMessage(String message) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
     );
+  }
 
-    if (byAuthorId > 0) return byAuthorId;
-
-    return _safeCount(db.collection('moments').where('userId', isEqualTo: uid));
+  void _showStorageLaterMessage() {
+    _showMessage(
+      'Upload ảnh sẽ làm sau vì Firebase Storage chưa bật. Hiện tại dùng placeholder trước.',
+    );
   }
 
   Future<void> _logout() async {
@@ -128,7 +142,7 @@ class _AccountTabState extends State<AccountTab> {
           ),
           title: const Text(
             'Đăng xuất?',
-            style: TextStyle(fontWeight: FontWeight.bold),
+            style: TextStyle(fontWeight: FontWeight.w900),
           ),
           content: const Text(
             'Bạn có chắc muốn đăng xuất tài khoản hiện tại không?',
@@ -169,17 +183,17 @@ class _AccountTabState extends State<AccountTab> {
     final majorController = TextEditingController(text: profile.major);
     final bioController = TextEditingController(text: profile.bio);
     final interestsController = TextEditingController(
-      text: profile.interests.join(', '),
+      text: profile.interests.map((e) => e.toString()).join(', '),
     );
     final goalsController = TextEditingController(
-      text: profile.goals.join(', '),
+      text: profile.goals.map((e) => e.toString()).join(', '),
     );
     final vibeTagsController = TextEditingController(
-      text: profile.vibeTags.join(', '),
+      text: profile.vibeTags.map((e) => e.toString()).join(', '),
     );
 
-    int selectedYear = profile.year;
-    String selectedGender = profile.gender.isEmpty
+    int selectedYear = profile.year <= 0 ? 1 : profile.year;
+    String selectedGender = profile.gender.trim().isEmpty
         ? 'Không muốn nói'
         : profile.gender;
 
@@ -234,6 +248,7 @@ class _AccountTabState extends State<AccountTab> {
                     'interests': interests,
                     'goals': goals,
                     'vibeTags': vibeTags,
+                    'status': 'active',
                   },
                 );
 
@@ -262,7 +277,7 @@ class _AccountTabState extends State<AccountTab> {
               ),
               title: const Text(
                 'Chỉnh sửa hồ sơ',
-                style: TextStyle(fontWeight: FontWeight.bold),
+                style: TextStyle(fontWeight: FontWeight.w900),
               ),
               content: SizedBox(
                 width: 560,
@@ -270,6 +285,10 @@ class _AccountTabState extends State<AccountTab> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      _buildDialogSectionTitle(
+                        icon: Icons.account_circle_rounded,
+                        title: 'Thông tin cơ bản',
+                      ),
                       _buildDialogTextField(
                         controller: nicknameController,
                         label: 'Nickname',
@@ -360,14 +379,13 @@ class _AccountTabState extends State<AccountTab> {
                       ),
                       const SizedBox(height: 18),
                       _buildDialogSectionTitle(
-                        icon: Icons.interests_rounded,
+                        icon: Icons.favorite_rounded,
                         title: 'Sở thích',
                       ),
-                      const SizedBox(height: 8),
                       _buildDialogTextField(
                         controller: interestsController,
                         label: 'Ví dụ: game, cà phê, học nhóm',
-                        icon: Icons.favorite_rounded,
+                        icon: Icons.interests_rounded,
                         maxLines: 2,
                       ),
                       const SizedBox(height: 14),
@@ -375,26 +393,24 @@ class _AccountTabState extends State<AccountTab> {
                         icon: Icons.flag_rounded,
                         title: 'Mục tiêu',
                       ),
-                      const SizedBox(height: 8),
                       _buildDialogTextField(
                         controller: goalsController,
-                        label: 'Ví dụ: tìm bạn học, đi chơi, tìm người yêu',
+                        label: 'Ví dụ: tìm bạn học, tìm teammate',
                         icon: Icons.rocket_launch_rounded,
                         maxLines: 2,
                       ),
                       const SizedBox(height: 14),
                       _buildDialogSectionTitle(
-                        icon: Icons.auto_awesome_rounded,
+                        icon: Icons.local_fire_department_rounded,
                         title: 'Vibe tags',
                       ),
-                      const SizedBox(height: 8),
                       _buildDialogTextField(
                         controller: vibeTagsController,
                         label: 'Ví dụ: chill, hướng nội, năng động',
-                        icon: Icons.local_fire_department_rounded,
+                        icon: Icons.auto_awesome_rounded,
                         maxLines: 2,
                       ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 10),
                       const Align(
                         alignment: Alignment.centerLeft,
                         child: Text(
@@ -471,7 +487,7 @@ class _AccountTabState extends State<AccountTab> {
       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(16),
-        borderSide: BorderSide(color: Colors.purple.shade100),
+        borderSide: const BorderSide(color: _border),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(16),
@@ -480,22 +496,63 @@ class _AccountTabState extends State<AccountTab> {
     );
   }
 
-  void _showMessage(String message) {
-    if (!mounted) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
+  Widget _buildDialogSectionTitle({
+    required IconData icon,
+    required String title,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: _primary),
+          const SizedBox(width: 8),
+          Text(
+            title,
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w900,
+              color: _primary,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
-  void _showStorageLaterMessage() {
-    _showMessage(
-      'Upload ảnh sẽ làm sau vì Firebase Storage chưa bật. Hiện tại dùng placeholder trước.',
-    );
+  Future<void> _softDeleteMyDocument({
+    required String collection,
+    required String docId,
+  }) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection(collection)
+          .doc(docId)
+          .update({
+            'status': 'deleted',
+            'deletedAt': FieldValue.serverTimestamp(),
+            'deletedBy': FirebaseAuth.instance.currentUser?.uid,
+          });
+
+      _showMessage('Đã xóa bài khỏi tài khoản của bạn');
+    } catch (e) {
+      _showMessage('Xóa thất bại: $e');
+    }
   }
 
-  void _goTo(int index) {
-    widget.onNavigate?.call(index);
+  Future<void> _markMarketSold(String docId) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('marketPosts')
+          .doc(docId)
+          .update({
+            'status': 'sold',
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+
+      _showMessage('Đã đánh dấu bài Market là đã bán');
+    } catch (e) {
+      _showMessage('Cập nhật thất bại: $e');
+    }
   }
 
   @override
@@ -530,85 +587,66 @@ class _AccountTabState extends State<AccountTab> {
                 _reloadData();
                 await Future.delayed(const Duration(milliseconds: 350));
               },
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final isWide = constraints.maxWidth >= 900;
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(18, 18, 18, 28),
+                children: [
+                  _buildHeroProfile(
+                    profile: profile,
+                    email: authUser?.email ?? '',
+                  ),
+                  const SizedBox(height: 18),
+                  FutureBuilder<_UserDashboardStats>(
+                    future: _statsFuture,
+                    builder: (context, statsSnapshot) {
+                      final stats =
+                          statsSnapshot.data ?? _UserDashboardStats.empty();
 
-                  return ListView(
-                    padding: const EdgeInsets.fromLTRB(18, 18, 18, 28),
-                    children: [
-                      _buildHeroProfile(
-                        profile: profile,
-                        email: authUser?.email ?? '',
-                      ),
-                      const SizedBox(height: 18),
-                      FutureBuilder<_UserDashboardStats>(
-                        future: _statsFuture,
-                        builder: (context, statsSnapshot) {
-                          final stats =
-                              statsSnapshot.data ?? _UserDashboardStats.empty();
-
-                          return _buildStatsSection(stats);
-                        },
-                      ),
-                      const SizedBox(height: 18),
-                      if (isWide)
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(child: _buildInfoCard(profile)),
-                            const SizedBox(width: 18),
-                            Expanded(child: _buildQuickActions(profile)),
+                      return Column(
+                        children: [
+                          if (stats.status == 'blocked') ...[
+                            _buildBlockedWarning(),
+                            const SizedBox(height: 18),
                           ],
-                        )
-                      else ...[
-                        _buildInfoCard(profile),
-                        const SizedBox(height: 18),
-                        _buildQuickActions(profile),
-                      ],
-                      const SizedBox(height: 18),
-                      _buildSectionCard(
-                        title: 'Bio',
-                        icon: Icons.notes_rounded,
-                        child: Text(
-                          profile.bio.isEmpty
-                              ? 'Chưa có bio. Hãy viết vài dòng để người khác hiểu vibe của bạn hơn.'
-                              : profile.bio,
-                          style: const TextStyle(
-                            color: Colors.black87,
-                            height: 1.45,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 18),
-                      _buildTagSection(
-                        title: 'Mục tiêu',
-                        icon: Icons.flag_rounded,
-                        items: profile.goals,
-                        emptyText:
-                            'Chưa cập nhật mục tiêu. Ví dụ: tìm bạn học, tìm teammate, tìm người yêu.',
-                      ),
-                      const SizedBox(height: 18),
-                      _buildTagSection(
-                        title: 'Sở thích',
-                        icon: Icons.interests_rounded,
-                        items: profile.interests,
-                        emptyText:
-                            'Chưa cập nhật sở thích. Ví dụ: game, cà phê, chạy deadline, nghe nhạc.',
-                      ),
-                      const SizedBox(height: 18),
-                      _buildTagSection(
-                        title: 'Vibe tags',
-                        icon: Icons.auto_awesome_rounded,
-                        items: profile.vibeTags,
-                        emptyText:
-                            'Chưa cập nhật vibe tags. Ví dụ: chill, hướng nội, năng động.',
-                      ),
-                      const SizedBox(height: 18),
-                      _buildFeaturedImagesSection(profile),
-                    ],
-                  );
-                },
+                          _buildStatsSection(stats),
+                        ],
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 18),
+                  _buildQuickActions(profile),
+                  const SizedBox(height: 18),
+                  _buildProfileInfoSection(profile),
+                  const SizedBox(height: 18),
+                  _buildMyActivitySection(),
+                  const SizedBox(height: 18),
+                  _buildTagSection(
+                    title: 'Mục tiêu',
+                    icon: Icons.flag_rounded,
+                    items: profile.goals,
+                    emptyText:
+                        'Chưa cập nhật mục tiêu. Ví dụ: tìm bạn học, tìm teammate, tìm người cùng vibe.',
+                  ),
+                  const SizedBox(height: 18),
+                  _buildTagSection(
+                    title: 'Sở thích',
+                    icon: Icons.interests_rounded,
+                    items: profile.interests,
+                    emptyText:
+                        'Chưa cập nhật sở thích. Ví dụ: game, cà phê, chạy deadline, nghe nhạc.',
+                  ),
+                  const SizedBox(height: 18),
+                  _buildTagSection(
+                    title: 'Vibe tags',
+                    icon: Icons.auto_awesome_rounded,
+                    items: profile.vibeTags,
+                    emptyText:
+                        'Chưa cập nhật vibe tags. Ví dụ: chill, hướng nội, năng động.',
+                  ),
+                  const SizedBox(height: 18),
+                  _buildFeaturedImagesSection(profile),
+                  const SizedBox(height: 18),
+                  _buildAccountSettingsSection(),
+                ],
               ),
             );
           },
@@ -626,17 +664,7 @@ class _AccountTabState extends State<AccountTab> {
         : profile.nickname.trim()[0].toUpperCase();
 
     return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(30),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.purple.withOpacity(0.08),
-            blurRadius: 22,
-            offset: const Offset(0, 12),
-          ),
-        ],
-      ),
+      decoration: _cardDecoration(radius: 30),
       child: Column(
         children: [
           Stack(
@@ -683,7 +711,7 @@ class _AccountTabState extends State<AccountTab> {
                               style: TextStyle(
                                 color: Colors.white.withOpacity(0.88),
                                 fontSize: 14,
-                                fontWeight: FontWeight.w700,
+                                fontWeight: FontWeight.w800,
                               ),
                             ),
                           ),
@@ -704,7 +732,7 @@ class _AccountTabState extends State<AccountTab> {
                       ),
                       child: CircleAvatar(
                         radius: 48,
-                        backgroundColor: const Color(0xFFF1EAFF),
+                        backgroundColor: _softPurple,
                         backgroundImage: profile.avatarUrl.isNotEmpty
                             ? NetworkImage(profile.avatarUrl)
                             : null,
@@ -797,28 +825,50 @@ class _AccountTabState extends State<AccountTab> {
     );
   }
 
+  Widget _buildBlockedWarning() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFEBEE),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: const Color(0xFFFFCDD2)),
+      ),
+      child: const Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.block_rounded, color: Color(0xFFE53935)),
+          SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Tài khoản của bạn đang bị khóa. Bạn có thể xem một số thông tin, nhưng không thể đăng bài, gửi signal hoặc nhắn tin cho tới khi admin mở khóa.',
+              style: TextStyle(
+                color: Color(0xFF9F1D1D),
+                height: 1.4,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildStatsSection(_UserDashboardStats stats) {
     return _buildSectionCard(
       title: 'Thống kê cá nhân',
       icon: Icons.insights_rounded,
-      trailing: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color: const Color(0xFFF1EAFF),
-          borderRadius: BorderRadius.circular(999),
-        ),
-        child: Text(
-          _formatRole(stats.role),
-          style: const TextStyle(
-            color: _primary,
-            fontWeight: FontWeight.w800,
-            fontSize: 12,
-          ),
-        ),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _buildStatusPill(stats.status),
+          const SizedBox(width: 8),
+          _buildRolePill(stats.role),
+        ],
       ),
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final crossAxisCount = constraints.maxWidth >= 700 ? 6 : 3;
+          final crossAxisCount = constraints.maxWidth >= 760 ? 7 : 3;
 
           return GridView.count(
             shrinkWrap: true,
@@ -826,12 +876,17 @@ class _AccountTabState extends State<AccountTab> {
             crossAxisCount: crossAxisCount,
             mainAxisSpacing: 10,
             crossAxisSpacing: 10,
-            childAspectRatio: constraints.maxWidth >= 700 ? 1.05 : 1.12,
+            childAspectRatio: constraints.maxWidth >= 760 ? 1.05 : 1.05,
             children: [
               _buildStatTile(
-                icon: Icons.send_rounded,
-                label: 'Signal',
+                icon: Icons.north_east_rounded,
+                label: 'Đã gửi',
                 value: stats.sentSignals,
+              ),
+              _buildStatTile(
+                icon: Icons.south_west_rounded,
+                label: 'Nhận',
+                value: stats.receivedSignals,
               ),
               _buildStatTile(
                 icon: Icons.favorite_rounded,
@@ -875,7 +930,7 @@ class _AccountTabState extends State<AccountTab> {
       decoration: BoxDecoration(
         color: const Color(0xFFF9F7FF),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: const Color(0xFFEDE7FF)),
+        border: Border.all(color: _border),
       ),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -896,40 +951,9 @@ class _AccountTabState extends State<AccountTab> {
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(
               color: Colors.black54,
-              fontWeight: FontWeight.w600,
+              fontWeight: FontWeight.w700,
               fontSize: 12,
             ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildInfoCard(UserProfile profile) {
-    return _buildSectionCard(
-      title: 'Thông tin sinh viên',
-      icon: Icons.account_circle_rounded,
-      child: Column(
-        children: [
-          _buildInfoRow(
-            icon: Icons.school_rounded,
-            label: 'Trường',
-            value: profile.university,
-          ),
-          _buildInfoRow(
-            icon: Icons.menu_book_rounded,
-            label: 'Ngành',
-            value: profile.major,
-          ),
-          _buildInfoRow(
-            icon: Icons.calendar_month_rounded,
-            label: 'Năm học',
-            value: 'Năm ${profile.year}',
-          ),
-          _buildInfoRow(
-            icon: Icons.person_rounded,
-            label: 'Giới tính',
-            value: profile.gender.isEmpty ? 'Chưa cập nhật' : profile.gender,
           ),
         ],
       ),
@@ -955,10 +979,32 @@ class _AccountTabState extends State<AccountTab> {
               const SizedBox(width: 10),
               Expanded(
                 child: _buildQuickActionButton(
-                  icon: Icons.chat_bubble_rounded,
-                  label: 'Vào Chat',
+                  icon: Icons.favorite_rounded,
+                  label: 'Tìm vibe',
+                  color: _pink,
+                  onTap: () => _goTo(0),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: _buildQuickActionButton(
+                  icon: Icons.forum_rounded,
+                  label: 'Confession',
+                  color: const Color(0xFF8E2DE2),
+                  onTap: () => _goTo(1),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _buildQuickActionButton(
+                  icon: Icons.auto_awesome_rounded,
+                  label: 'UniMoment',
                   color: const Color(0xFF00A6A6),
-                  onTap: () => _goTo(4),
+                  onTap: () => _goTo(2),
                 ),
               ),
             ],
@@ -969,7 +1015,7 @@ class _AccountTabState extends State<AccountTab> {
               Expanded(
                 child: _buildQuickActionButton(
                   icon: Icons.storefront_rounded,
-                  label: 'Đăng Market',
+                  label: 'Market',
                   color: const Color(0xFFFF8A00),
                   onTap: () => _goTo(3),
                 ),
@@ -977,32 +1023,10 @@ class _AccountTabState extends State<AccountTab> {
               const SizedBox(width: 10),
               Expanded(
                 child: _buildQuickActionButton(
-                  icon: Icons.forum_rounded,
-                  label: 'Confession',
-                  color: const Color(0xFF8E2DE2),
-                  onTap: () => _goTo(1),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: _buildQuickActionButton(
-                  icon: Icons.auto_awesome_rounded,
-                  label: 'UniMoment',
-                  color: _pink,
-                  onTap: () => _goTo(2),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _buildQuickActionButton(
-                  icon: Icons.logout_rounded,
-                  label: 'Đăng xuất',
-                  color: const Color(0xFFE53935),
-                  onTap: _showLogoutConfirmDialog,
+                  icon: Icons.chat_bubble_rounded,
+                  label: 'Chat',
+                  color: const Color(0xFF18A058),
+                  onTap: () => _goTo(4),
                 ),
               ),
             ],
@@ -1040,7 +1064,7 @@ class _AccountTabState extends State<AccountTab> {
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   color: color,
-                  fontWeight: FontWeight.w800,
+                  fontWeight: FontWeight.w900,
                   fontSize: 13,
                 ),
               ),
@@ -1051,62 +1075,423 @@ class _AccountTabState extends State<AccountTab> {
     );
   }
 
-  Widget _buildFeaturedImagesSection(UserProfile profile) {
+  Widget _buildProfileInfoSection(UserProfile profile) {
     return _buildSectionCard(
-      title: 'Ảnh nổi bật',
-      icon: Icons.photo_library_rounded,
+      title: 'Hồ sơ của tôi',
+      icon: Icons.account_circle_rounded,
       trailing: TextButton.icon(
-        onPressed: _showStorageLaterMessage,
-        icon: const Icon(Icons.add_photo_alternate_rounded, size: 18),
-        label: const Text('Thêm'),
+        onPressed: () => _showEditProfileDialog(profile),
+        icon: const Icon(Icons.edit_rounded, size: 17),
+        label: const Text('Sửa'),
       ),
-      child: profile.featuredImageUrls.isEmpty
-          ? Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(16),
+      child: Column(
+        children: [
+          _buildInfoRow(
+            icon: Icons.school_rounded,
+            label: 'Trường',
+            value: profile.university,
+          ),
+          _buildInfoRow(
+            icon: Icons.menu_book_rounded,
+            label: 'Ngành',
+            value: profile.major,
+          ),
+          _buildInfoRow(
+            icon: Icons.calendar_month_rounded,
+            label: 'Năm học',
+            value: 'Năm ${profile.year}',
+          ),
+          _buildInfoRow(
+            icon: Icons.person_rounded,
+            label: 'Giới tính',
+            value: profile.gender.isEmpty ? 'Chưa cập nhật' : profile.gender,
+          ),
+          const SizedBox(height: 4),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF9F7FF),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: _border),
+            ),
+            child: Text(
+              profile.bio.isEmpty
+                  ? 'Chưa có bio. Hãy viết vài dòng để người khác hiểu vibe của bạn hơn.'
+                  : profile.bio,
+              style: const TextStyle(color: Colors.black87, height: 1.45),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMyActivitySection() {
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+
+    if (uid.isEmpty) {
+      return _buildSectionCard(
+        title: 'Hoạt động của tôi',
+        icon: Icons.dashboard_customize_rounded,
+        child: const Text(
+          'Bạn chưa đăng nhập.',
+          style: TextStyle(color: Colors.black54),
+        ),
+      );
+    }
+
+    return _buildSectionCard(
+      title: 'Hoạt động của tôi',
+      icon: Icons.dashboard_customize_rounded,
+      child: DefaultTabController(
+        length: 4,
+        child: Column(
+          children: [
+            Container(
               decoration: BoxDecoration(
                 color: const Color(0xFFF9F7FF),
                 borderRadius: BorderRadius.circular(18),
-                border: Border.all(color: const Color(0xFFEDE7FF)),
+                border: Border.all(color: _border),
               ),
-              child: const Text(
-                'Chưa có ảnh nổi bật. Sau khi bật Firebase Storage, mục này sẽ dùng để show ảnh cá nhân/hoạt động nổi bật.',
-                style: TextStyle(color: Colors.black54, height: 1.4),
+              child: const TabBar(
+                isScrollable: true,
+                tabAlignment: TabAlignment.start,
+                labelColor: _primary,
+                unselectedLabelColor: Colors.black54,
+                indicatorColor: _primary,
+                tabs: [
+                  Tab(text: 'Confession'),
+                  Tab(text: 'Market'),
+                  Tab(text: 'Moment'),
+                  Tab(text: 'Signal'),
+                ],
               ),
-            )
-          : GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: profile.featuredImageUrls.length,
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 3,
-                crossAxisSpacing: 8,
-                mainAxisSpacing: 8,
-              ),
-              itemBuilder: (context, index) {
-                final imageUrl = profile.featuredImageUrls[index];
-
-                return ClipRRect(
-                  borderRadius: BorderRadius.circular(16),
-                  child: Image.network(
-                    imageUrl,
-                    width: double.infinity,
-                    height: double.infinity,
-                    fit: BoxFit.cover,
-                    errorBuilder: (context, error, stackTrace) {
-                      return Container(
-                        color: const Color(0xFFF1EAFF),
-                        child: const Icon(
-                          Icons.broken_image_rounded,
-                          color: _primary,
-                        ),
-                      );
-                    },
-                  ),
-                );
-              },
             ),
+            const SizedBox(height: 14),
+            SizedBox(
+              height: 360,
+              child: TabBarView(
+                children: [
+                  _buildMyDocsList(
+                    query: FirebaseFirestore.instance
+                        .collection('confessions')
+                        .where('authorId', isEqualTo: uid),
+                    emptyIcon: Icons.forum_outlined,
+                    emptyText: 'Bạn chưa đăng confession nào.',
+                    collectionName: 'confessions',
+                    type: _MyDocType.confession,
+                  ),
+                  _buildMyDocsList(
+                    query: FirebaseFirestore.instance
+                        .collection('marketPosts')
+                        .where('sellerId', isEqualTo: uid),
+                    emptyIcon: Icons.storefront_outlined,
+                    emptyText: 'Bạn chưa đăng bài Market nào.',
+                    collectionName: 'marketPosts',
+                    type: _MyDocType.market,
+                  ),
+                  _buildMyDocsList(
+                    query: FirebaseFirestore.instance
+                        .collection('moments')
+                        .where('authorId', isEqualTo: uid),
+                    emptyIcon: Icons.auto_awesome_outlined,
+                    emptyText: 'Bạn chưa đăng UniMoment nào.',
+                    collectionName: 'moments',
+                    type: _MyDocType.moment,
+                  ),
+                  _buildSignalList(uid),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
+  }
+
+  Widget _buildMyDocsList({
+    required Query<Map<String, dynamic>> query,
+    required IconData emptyIcon,
+    required String emptyText,
+    required String collectionName,
+    required _MyDocType type,
+  }) {
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: query.snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(
+            child: CircularProgressIndicator(color: _primary),
+          );
+        }
+
+        if (snapshot.hasError) {
+          return _buildInlineError(snapshot.error.toString());
+        }
+
+        final docs = snapshot.data?.docs ?? [];
+
+        if (docs.isEmpty) {
+          return _buildInlineEmpty(icon: emptyIcon, text: emptyText);
+        }
+
+        return ListView.separated(
+          padding: EdgeInsets.zero,
+          itemCount: docs.length,
+          separatorBuilder: (_, __) => const SizedBox(height: 10),
+          itemBuilder: (context, index) {
+            final doc = docs[index];
+            final data = doc.data();
+
+            return _buildMyDocTile(
+              docId: doc.id,
+              data: data,
+              collectionName: collectionName,
+              type: type,
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildMyDocTile({
+    required String docId,
+    required Map<String, dynamic> data,
+    required String collectionName,
+    required _MyDocType type,
+  }) {
+    final title = _getDocTitle(data, type);
+    final content = _getDocContent(data, type);
+    final status = data['status']?.toString() ?? 'active';
+    final createdAt = _formatTimestamp(data['createdAt']);
+
+    IconData icon;
+    Color color;
+
+    switch (type) {
+      case _MyDocType.confession:
+        icon = Icons.forum_rounded;
+        color = const Color(0xFF8E2DE2);
+        break;
+      case _MyDocType.market:
+        icon = Icons.storefront_rounded;
+        color = const Color(0xFFFF8A00);
+        break;
+      case _MyDocType.moment:
+        icon = Icons.auto_awesome_rounded;
+        color = _pink;
+        break;
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF9F7FF),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: _border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              _buildSmallIcon(icon: icon, color: color),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: _darkText,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 15,
+                  ),
+                ),
+              ),
+              _buildSmallStatus(status),
+            ],
+          ),
+          if (content.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Text(
+              content,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Colors.black54, height: 1.35),
+            ),
+          ],
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Icon(
+                Icons.schedule_rounded,
+                size: 15,
+                color: Colors.grey.shade500,
+              ),
+              const SizedBox(width: 5),
+              Expanded(
+                child: Text(
+                  createdAt,
+                  style: TextStyle(
+                    color: Colors.grey.shade600,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              if (type == _MyDocType.market)
+                TextButton(
+                  onPressed: () => _markMarketSold(docId),
+                  child: const Text('Đã bán'),
+                ),
+              TextButton(
+                onPressed: () => _softDeleteMyDocument(
+                  collection: collectionName,
+                  docId: docId,
+                ),
+                child: const Text(
+                  'Xóa',
+                  style: TextStyle(color: Color(0xFFE53935)),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSignalList(String uid) {
+    final query = FirebaseFirestore.instance
+        .collection('signals')
+        .where('senderId', isEqualTo: uid);
+
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: query.snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(
+            child: CircularProgressIndicator(color: _primary),
+          );
+        }
+
+        if (snapshot.hasError) {
+          return _buildInlineError(snapshot.error.toString());
+        }
+
+        final docs = snapshot.data?.docs ?? [];
+
+        if (docs.isEmpty) {
+          return _buildInlineEmpty(
+            icon: Icons.send_outlined,
+            text: 'Bạn chưa gửi signal nào.',
+          );
+        }
+
+        return ListView.separated(
+          padding: EdgeInsets.zero,
+          itemCount: docs.length,
+          separatorBuilder: (_, __) => const SizedBox(height: 10),
+          itemBuilder: (context, index) {
+            final data = docs[index].data();
+
+            final receiverId = data['receiverId']?.toString() ?? 'Không rõ';
+            final status = data['status']?.toString() ?? 'pending';
+            final createdAt = _formatTimestamp(data['createdAt']);
+
+            return Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF9F7FF),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: _border),
+              ),
+              child: Row(
+                children: [
+                  _buildSmallIcon(icon: Icons.send_rounded, color: _primary),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Signal đã gửi',
+                          style: TextStyle(
+                            color: _darkText,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Người nhận: $receiverId',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.black54,
+                            fontSize: 12,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          createdAt,
+                          style: TextStyle(
+                            color: Colors.grey.shade600,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  _buildSmallStatus(status),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  String _getDocTitle(Map<String, dynamic> data, _MyDocType type) {
+    switch (type) {
+      case _MyDocType.confession:
+        return data['title']?.toString().trim().isNotEmpty == true
+            ? data['title'].toString()
+            : 'Confession của tôi';
+      case _MyDocType.market:
+        return data['title']?.toString().trim().isNotEmpty == true
+            ? data['title'].toString()
+            : 'Bài Market của tôi';
+      case _MyDocType.moment:
+        return data['caption']?.toString().trim().isNotEmpty == true
+            ? data['caption'].toString()
+            : 'UniMoment của tôi';
+    }
+  }
+
+  String _getDocContent(Map<String, dynamic> data, _MyDocType type) {
+    switch (type) {
+      case _MyDocType.confession:
+        return data['content']?.toString() ??
+            data['text']?.toString() ??
+            data['body']?.toString() ??
+            '';
+      case _MyDocType.market:
+        final description = data['description']?.toString() ?? '';
+        final price = data['price'];
+        if (price == null || price.toString().isEmpty) {
+          return description;
+        }
+        return '$description\nGiá: $price';
+      case _MyDocType.moment:
+        return data['caption']?.toString() ??
+            data['content']?.toString() ??
+            data['text']?.toString() ??
+            '';
+    }
   }
 
   Widget _buildTagSection({
@@ -1141,21 +1526,161 @@ class _AccountTabState extends State<AccountTab> {
                     vertical: 8,
                   ),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF1EAFF),
+                    color: _softPurple,
                     borderRadius: BorderRadius.circular(999),
-                    border: Border.all(color: Colors.purple.shade100),
+                    border: Border.all(color: _border),
                   ),
                   child: Text(
                     item.toString(),
                     style: const TextStyle(
                       color: _darkText,
-                      fontWeight: FontWeight.w700,
+                      fontWeight: FontWeight.w800,
                       fontSize: 13,
                     ),
                   ),
                 );
               }).toList(),
             ),
+    );
+  }
+
+  Widget _buildFeaturedImagesSection(UserProfile profile) {
+    return _buildSectionCard(
+      title: 'Ảnh nổi bật',
+      icon: Icons.photo_library_rounded,
+      trailing: TextButton.icon(
+        onPressed: _showStorageLaterMessage,
+        icon: const Icon(Icons.add_photo_alternate_rounded, size: 18),
+        label: const Text('Thêm'),
+      ),
+      child: profile.featuredImageUrls.isEmpty
+          ? Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF9F7FF),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: _border),
+              ),
+              child: const Text(
+                'Chưa có ảnh nổi bật. Sau khi bật Firebase Storage, mục này sẽ dùng để show ảnh cá nhân/hoạt động nổi bật.',
+                style: TextStyle(color: Colors.black54, height: 1.4),
+              ),
+            )
+          : GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: profile.featuredImageUrls.length,
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 3,
+                crossAxisSpacing: 8,
+                mainAxisSpacing: 8,
+              ),
+              itemBuilder: (context, index) {
+                final imageUrl = profile.featuredImageUrls[index].toString();
+
+                return ClipRRect(
+                  borderRadius: BorderRadius.circular(16),
+                  child: Image.network(
+                    imageUrl,
+                    width: double.infinity,
+                    height: double.infinity,
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) {
+                      return Container(
+                        color: _softPurple,
+                        child: const Icon(
+                          Icons.broken_image_rounded,
+                          color: _primary,
+                        ),
+                      );
+                    },
+                  ),
+                );
+              },
+            ),
+    );
+  }
+
+  Widget _buildAccountSettingsSection() {
+    return _buildSectionCard(
+      title: 'Cài đặt tài khoản',
+      icon: Icons.settings_rounded,
+      child: Column(
+        children: [
+          _buildSettingTile(
+            icon: Icons.refresh_rounded,
+            title: 'Tải lại dữ liệu',
+            subtitle: 'Làm mới hồ sơ, thống kê và hoạt động',
+            color: _primary,
+            onTap: _reloadData,
+          ),
+          const SizedBox(height: 10),
+          _buildSettingTile(
+            icon: Icons.image_rounded,
+            title: 'Upload ảnh',
+            subtitle: 'Sẽ bật sau khi cấu hình Firebase Storage',
+            color: const Color(0xFFFF8A00),
+            onTap: _showStorageLaterMessage,
+          ),
+          const SizedBox(height: 10),
+          _buildSettingTile(
+            icon: Icons.logout_rounded,
+            title: 'Đăng xuất',
+            subtitle: 'Thoát khỏi tài khoản hiện tại',
+            color: const Color(0xFFE53935),
+            onTap: _showLogoutConfirmDialog,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSettingTile({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(18),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.07),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: color.withOpacity(0.16)),
+        ),
+        child: Row(
+          children: [
+            _buildSmallIcon(icon: icon, color: color),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(color: color, fontWeight: FontWeight.w900),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(
+                      color: Colors.black54,
+                      fontSize: 12,
+                      height: 1.3,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right_rounded, color: color),
+          ],
+        ),
+      ),
     );
   }
 
@@ -1174,15 +1699,7 @@ class _AccountTabState extends State<AccountTab> {
         children: [
           Row(
             children: [
-              Container(
-                width: 38,
-                height: 38,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF1EAFF),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Icon(icon, color: _primary, size: 21),
-              ),
+              _buildSmallIcon(icon: icon, color: _primary),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
@@ -1213,15 +1730,7 @@ class _AccountTabState extends State<AccountTab> {
       padding: const EdgeInsets.only(bottom: 11),
       child: Row(
         children: [
-          Container(
-            width: 38,
-            height: 38,
-            decoration: BoxDecoration(
-              color: const Color(0xFFF1EAFF),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Icon(icon, color: _primary, size: 20),
-          ),
+          _buildSmallIcon(icon: icon, color: _primary),
           const SizedBox(width: 12),
           Expanded(
             child: Text(
@@ -1248,9 +1757,9 @@ class _AccountTabState extends State<AccountTab> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
       decoration: BoxDecoration(
-        color: const Color(0xFFF7F3FF),
+        color: _bg,
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: const Color(0xFFEDE7FF)),
+        border: Border.all(color: _border),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -1261,11 +1770,159 @@ class _AccountTabState extends State<AccountTab> {
             text,
             style: const TextStyle(
               color: _darkText,
-              fontWeight: FontWeight.w700,
+              fontWeight: FontWeight.w800,
               fontSize: 12,
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildSmallIcon({required IconData icon, required Color color}) {
+    return Container(
+      width: 38,
+      height: 38,
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.09),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Icon(icon, color: color, size: 20),
+    );
+  }
+
+  Widget _buildRolePill(String role) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: _softPurple,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        _formatRole(role),
+        style: const TextStyle(
+          color: _primary,
+          fontWeight: FontWeight.w900,
+          fontSize: 12,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatusPill(String status) {
+    final isBlocked = status == 'blocked';
+    final color = isBlocked ? const Color(0xFFE53935) : const Color(0xFF18A058);
+    final text = isBlocked ? 'Blocked' : 'Active';
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.09),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          color: color,
+          fontWeight: FontWeight.w900,
+          fontSize: 12,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSmallStatus(String status) {
+    Color color;
+    String text;
+
+    switch (status) {
+      case 'active':
+        color = const Color(0xFF18A058);
+        text = 'active';
+        break;
+      case 'sold':
+        color = const Color(0xFFFF8A00);
+        text = 'sold';
+        break;
+      case 'hidden':
+        color = const Color(0xFF8E2DE2);
+        text = 'hidden';
+        break;
+      case 'deleted':
+        color = const Color(0xFFE53935);
+        text = 'deleted';
+        break;
+      case 'matched':
+        color = _pink;
+        text = 'matched';
+        break;
+      case 'pending':
+      default:
+        color = _primary;
+        text = status.isEmpty ? 'pending' : status;
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.09),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          color: color,
+          fontWeight: FontWeight.w900,
+          fontSize: 11,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInlineEmpty({required IconData icon, required String text}) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF9F7FF),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: _border),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, color: _primary, size: 38),
+          const SizedBox(height: 10),
+          Text(
+            text,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: Colors.black54,
+              height: 1.4,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInlineError(String error) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFEBEE),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFFFFCDD2)),
+      ),
+      child: Text(
+        'Không tải được dữ liệu: $error',
+        style: const TextStyle(
+          color: Color(0xFFE53935),
+          height: 1.4,
+          fontWeight: FontWeight.w700,
+        ),
       ),
     );
   }
@@ -1282,7 +1939,7 @@ class _AccountTabState extends State<AccountTab> {
             children: [
               const CircleAvatar(
                 radius: 34,
-                backgroundColor: Color(0xFFF1EAFF),
+                backgroundColor: _softPurple,
                 child: Icon(
                   Icons.person_search_rounded,
                   color: _primary,
@@ -1295,7 +1952,7 @@ class _AccountTabState extends State<AccountTab> {
                 style: TextStyle(
                   color: _darkText,
                   fontSize: 20,
-                  fontWeight: FontWeight.bold,
+                  fontWeight: FontWeight.w900,
                 ),
               ),
               const SizedBox(height: 8),
@@ -1346,7 +2003,7 @@ class _AccountTabState extends State<AccountTab> {
                 style: TextStyle(
                   color: _darkText,
                   fontSize: 20,
-                  fontWeight: FontWeight.bold,
+                  fontWeight: FontWeight.w900,
                 ),
               ),
               const SizedBox(height: 8),
@@ -1372,10 +2029,10 @@ class _AccountTabState extends State<AccountTab> {
     );
   }
 
-  BoxDecoration _cardDecoration() {
+  BoxDecoration _cardDecoration({double radius = 26}) {
     return BoxDecoration(
       color: Colors.white,
-      borderRadius: BorderRadius.circular(26),
+      borderRadius: BorderRadius.circular(radius),
       boxShadow: [
         BoxShadow(
           color: Colors.purple.withOpacity(0.07),
@@ -1383,29 +2040,6 @@ class _AccountTabState extends State<AccountTab> {
           offset: const Offset(0, 10),
         ),
       ],
-    );
-  }
-
-  Widget _buildDialogSectionTitle({
-    required IconData icon,
-    required String title,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 14, bottom: 8),
-      child: Row(
-        children: [
-          Icon(icon, size: 18, color: _primary),
-          const SizedBox(width: 8),
-          Text(
-            title,
-            style: const TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w800,
-              color: Color(0xFF6D4AFF),
-            ),
-          ),
-        ],
-      ),
     );
   }
 
@@ -1424,36 +2058,57 @@ class _AccountTabState extends State<AccountTab> {
         return 'Student';
     }
   }
+
+  String _formatTimestamp(dynamic value) {
+    if (value is Timestamp) {
+      final date = value.toDate();
+      return '${_two(date.day)}/${_two(date.month)}/${date.year} ${_two(date.hour)}:${_two(date.minute)}';
+    }
+
+    return 'Chưa rõ thời gian';
+  }
+
+  String _two(int value) {
+    return value.toString().padLeft(2, '0');
+  }
 }
+
+enum _MyDocType { confession, market, moment }
 
 class _UserDashboardStats {
   final int sentSignals;
+  final int receivedSignals;
   final int matches;
   final int chatRooms;
   final int confessions;
   final int moments;
   final int marketPosts;
   final String role;
+  final String status;
 
   const _UserDashboardStats({
     required this.sentSignals,
+    required this.receivedSignals,
     required this.matches,
     required this.chatRooms,
     required this.confessions,
     required this.moments,
     required this.marketPosts,
     required this.role,
+    required this.status,
   });
 
   factory _UserDashboardStats.empty() {
     return const _UserDashboardStats(
       sentSignals: 0,
+      receivedSignals: 0,
       matches: 0,
       chatRooms: 0,
       confessions: 0,
       moments: 0,
       marketPosts: 0,
       role: 'student',
+      status: 'active',
     );
   }
 }
