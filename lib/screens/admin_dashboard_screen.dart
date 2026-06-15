@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'admin_content_detail_screen.dart';
 import 'auth_gate.dart';
 
+import 'admin_chat_management_screen.dart';
 import '../services/admin_service.dart';
 import '../services/chat_service.dart';
 
@@ -47,6 +48,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       title: 'Nội dung',
       subtitle: 'Bài đăng trong app',
       icon: Icons.article_rounded,
+    ),
+    _AdminTabItem(
+      title: 'Chat',
+      subtitle: 'Xem đoạn chat',
+      icon: Icons.forum_rounded,
     ),
   ];
 
@@ -661,6 +667,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                       _buildReportsTab(),
                       _buildUsersTab(),
                       _buildContentTab(),
+                      const AdminChatManagementScreen(),
                     ],
                   ),
                 ),
