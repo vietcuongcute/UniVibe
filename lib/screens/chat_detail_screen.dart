@@ -1,6 +1,8 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
+import '../services/report_service.dart';
 import '../services/chat_service.dart';
 
 class ChatDetailScreen extends StatefulWidget {
@@ -144,7 +146,17 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                 ),
               ],
             ),
+            actions: [
+              IconButton(
+                tooltip: 'Tùy chọn',
+                onPressed: () {
+                  _showChatOptionsBottomSheet(context, room);
+                },
+                icon: const Icon(Icons.more_vert_rounded),
+              ),
+            ],
           ),
+
           body: Column(
             children: [
               if (isBlind && !isRevealed && room != null)
@@ -476,5 +488,402 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         ),
       ),
     );
+  }
+
+  void _showChatOptionsBottomSheet(
+    BuildContext context,
+    FirestoreChatRoom? room,
+  ) {
+    if (room == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Chưa tải được thông tin phòng chat.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (bottomSheetContext) {
+        return SafeArea(
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.only(
+                topLeft: Radius.circular(28),
+                topRight: Radius.circular(28),
+              ),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 46,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(100),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 26,
+                      backgroundColor: const Color(0xFF7B61FF),
+                      child: Text(
+                        room.otherName.isNotEmpty
+                            ? room.otherName[0].toUpperCase()
+                            : 'U',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 20,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        room.otherName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 19,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                _buildChatOptionTile(
+                  icon: Icons.flag_rounded,
+                  title: 'Report đoạn chat',
+                  subtitle: 'Gửi báo cáo cho admin kiểm duyệt.',
+                  color: const Color(0xFFFF9800),
+                  backgroundColor: const Color(0xFFFFF3E0),
+                  onTap: () {
+                    Navigator.pop(bottomSheetContext);
+                    _showReportChatDialog(context, room);
+                  },
+                ),
+                const SizedBox(height: 10),
+                _buildChatOptionTile(
+                  icon: Icons.block_rounded,
+                  title: 'Chặn người này',
+                  subtitle: 'Ẩn đoạn chat và chặn tương tác với người này.',
+                  color: const Color(0xFFE53935),
+                  backgroundColor: const Color(0xFFFFEBEE),
+                  onTap: () {
+                    Navigator.pop(bottomSheetContext);
+                    _showBlockUserConfirmDialog(context, room);
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildChatOptionTile({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required Color color,
+    required Color backgroundColor,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(18),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: backgroundColor.withOpacity(0.65),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: color.withOpacity(0.16)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: backgroundColor,
+                borderRadius: BorderRadius.circular(15),
+              ),
+              child: Icon(icon, color: color),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      color: color,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(
+                      color: Colors.black54,
+                      fontSize: 12.5,
+                      height: 1.3,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showReportChatDialog(BuildContext context, FirestoreChatRoom room) {
+    final detailController = TextEditingController();
+    String selectedReason = 'Tin nhắn không phù hợp';
+
+    final reasons = [
+      'Tin nhắn không phù hợp',
+      'Quấy rối/làm phiền',
+      'Spam hoặc lừa đảo',
+      'Giả mạo danh tính',
+      'Lý do khác',
+    ];
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(24),
+              ),
+              title: const Text(
+                'Report đoạn chat',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Bạn đang report đoạn chat với ${room.otherName}. Admin sẽ kiểm tra nội dung này.',
+                      style: const TextStyle(
+                        color: Colors.black54,
+                        height: 1.35,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    DropdownButtonFormField<String>(
+                      value: selectedReason,
+                      items: reasons.map((reason) {
+                        return DropdownMenuItem<String>(
+                          value: reason,
+                          child: Text(reason),
+                        );
+                      }).toList(),
+                      onChanged: (value) {
+                        if (value == null) return;
+
+                        setDialogState(() {
+                          selectedReason = value;
+                        });
+                      },
+                      decoration: InputDecoration(
+                        labelText: 'Lý do report',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: detailController,
+                      minLines: 3,
+                      maxLines: 5,
+                      decoration: InputDecoration(
+                        labelText: 'Mô tả thêm',
+                        hintText: 'Nhập chi tiết để admin dễ kiểm tra...',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    detailController.dispose();
+                    Navigator.pop(dialogContext);
+                  },
+                  child: const Text('Hủy'),
+                ),
+                ElevatedButton.icon(
+                  onPressed: () async {
+                    final messenger = ScaffoldMessenger.of(context);
+                    final navigator = Navigator.of(dialogContext);
+
+                    final result = await ReportService.createReport(
+                      targetType: 'chat',
+                      targetId: room.id,
+                      targetOwnerId: room.otherUserId,
+                      reason: selectedReason,
+                      detail: detailController.text.trim(),
+                    );
+
+                    detailController.dispose();
+                    navigator.pop();
+
+                    messenger.showSnackBar(
+                      SnackBar(
+                        content: Text(result),
+                        behavior: SnackBarBehavior.floating,
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.flag_rounded),
+                  label: const Text('Gửi report'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF7B61FF),
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showBlockUserConfirmDialog(
+    BuildContext context,
+    FirestoreChatRoom room,
+  ) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+          ),
+          title: const Text(
+            'Chặn người này?',
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+          content: Text(
+            'Bạn có chắc muốn chặn ${room.otherName}? Đoạn chat này sẽ được ẩn khỏi danh sách của bạn.',
+            style: const TextStyle(color: Colors.black54, height: 1.4),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(dialogContext);
+              },
+              child: const Text('Hủy'),
+            ),
+            ElevatedButton.icon(
+              onPressed: () async {
+                Navigator.pop(dialogContext);
+                await _blockUserFromChat(context, room);
+              },
+              icon: const Icon(Icons.block_rounded),
+              label: const Text('Chặn'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFE53935),
+                foregroundColor: Colors.white,
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _blockUserFromChat(
+    BuildContext context,
+    FirestoreChatRoom room,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final currentUser = FirebaseAuth.instance.currentUser;
+
+    if (currentUser == null) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Bạn cần đăng nhập để chặn người dùng.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    try {
+      final db = FirebaseFirestore.instance;
+      final now = FieldValue.serverTimestamp();
+      final blockId = '${currentUser.uid}_${room.otherUserId}';
+
+      final batch = db.batch();
+
+      final blockRef = db.collection('blocks').doc(blockId);
+      batch.set(blockRef, {
+        'id': blockId,
+        'blockerId': currentUser.uid,
+        'blockedUserId': room.otherUserId,
+        'blockedUserName': room.otherName,
+        'chatRoomId': room.id,
+        'status': 'active',
+        'createdAt': now,
+        'updatedAt': now,
+      }, SetOptions(merge: true));
+
+      final chatRoomRef = db.collection('chatRooms').doc(room.id);
+      batch.set(chatRoomRef, {
+        'blockedBy': FieldValue.arrayUnion([currentUser.uid]),
+        'blockedPairs': FieldValue.arrayUnion([blockId]),
+        'updatedAt': now,
+      }, SetOptions(merge: true));
+
+      await batch.commit();
+
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('Đã chặn ${room.otherName}.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+
+      Navigator.pop(context);
+    } on FirebaseException catch (e) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('Chặn thất bại: ${e.message ?? e.code}'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('Chặn thất bại: $e'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 }
